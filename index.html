@@ -124,6 +124,11 @@
       <div></div>
     </div>
     <div class="walletList" id="walletList"></div>
+    <details style="margin-top:10px"><summary>Add many at once</summary>
+      <p class="hint" style="margin:8px 0 6px">Paste addresses — one per line, or comma/space separated. Pasting a list with extra text is fine; it pulls out every 0x… address, labels them wallet 1, 2, 3…, and skips duplicates.</p>
+      <textarea id="bulkAddr" rows="6" style="width:100%;font-family:var(--mono);font-size:12px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:#fff" placeholder="0x...&#10;0x...&#10;0x..."></textarea>
+      <button class="sky" style="margin-top:8px" onclick="addWalletsBulk()">Add all</button>
+    </details>
   </div>
 
   <!-- STEP 3: PULL -->
@@ -270,6 +275,14 @@ function addWallet(){
   if(myAddrs().has(lc(a))){ alert('Already added.'); return; }
   S.wallets.push({address:a,label:l||('wallet '+(S.wallets.length+1))}); save();
   document.getElementById('newAddr').value=''; document.getElementById('newLabel').value=''; renderWallets();
+}
+function addWalletsBulk(){
+  const raw=document.getElementById('bulkAddr').value;
+  const found=raw.match(/0x[a-fA-F0-9]{40}/g)||[];
+  const have=myAddrs(); let added=0, dupe=0;
+  for(const a of found){ if(have.has(lc(a))){dupe++;continue;} S.wallets.push({address:a,label:'wallet '+(S.wallets.length+1)}); have.add(lc(a)); added++; }
+  save(); renderWallets(); document.getElementById('bulkAddr').value='';
+  toast(`Added ${added} wallet(s)${dupe?`, skipped ${dupe} already present`:''}. Total: ${S.wallets.length}.`);
 }
 function escapeHtml(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
