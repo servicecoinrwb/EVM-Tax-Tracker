@@ -144,6 +144,7 @@
       <button id="pullBtn" onclick="pullAll()">Pull transactions</button>
       <button class="ghost" onclick="fetchPrices()">Fetch missing prices</button>
       <button class="danger" onclick="clearTransactions()">Clear transactions</button>
+      <button class="ghost" onclick="testPriceSources()">Test price sources</button>
       <span id="legCount" class="hint" style="margin:0"></span>
     </div>
     <div class="progress hidden" id="progWrap"><div id="progBar"></div></div>
@@ -501,6 +502,30 @@ function getPrice(token,contract,ts){
   if(STABLES.has(token)) return {usd:1,src:'stable'};
   if(S.prices[okey]!=null) return {usd:S.prices[okey],src:'cg'};
   return {usd:null,src:null};
+}
+async function testPriceSources(){
+  const ts=Math.floor(Date.parse('2022-02-09T00:00:00Z')/1000);
+  log('— PRICE SOURCE SELF-TEST · ETH 2022-02-09 · expect ≈ $3,000 —');
+  // 1) CoinGecko (free tier blocks >365 days — failure here is EXPECTED)
+  try{
+    const u=new URL(`${CG_BASE}/coins/ethereum/history`); u.searchParams.set('date','09-02-2022'); u.searchParams.set('localization','false');
+    if(S.keys.cg)u.searchParams.set('x_cg_demo_api_key',S.keys.cg);
+    const r=await fetch(u); let v=null; if(r.ok){ const j=await r.json(); v=j&&j.market_data&&j.market_data.current_price?j.market_data.current_price.usd:null; }
+    log(`CoinGecko:   HTTP ${r.status} → ${v!=null?('$'+v):'null (expected: free tier = last 365 days only)'}`);
+  }catch(e){ log(`CoinGecko:   FETCH ERROR → ${e.message}`); }
+  // 2) Coinbase (this is the one that SHOULD work)
+  try{
+    const r=await fetch(`https://api.coinbase.com/v2/prices/ETH-USD/spot?date=2022-02-09`);
+    let v=null; if(r.ok){ const j=await r.json(); v=j&&j.data&&j.data.amount?j.data.amount:null; }
+    log(`Coinbase:    HTTP ${r.status} → ${v!=null?('$'+v+'  ✅ working'):'null'}`);
+  }catch(e){ log(`Coinbase:    FETCH ERROR → ${e.message}  ← browser is blocking this (CORS/extension/VPN)`); }
+  // 3) CryptoCompare (backup)
+  try{
+    const u=new URL(CC_BASE); u.searchParams.set('fsym','ETH'); u.searchParams.set('tsym','USD'); u.searchParams.set('limit','1'); u.searchParams.set('toTs',String(ts));
+    const r=await fetch(u); let v=null; if(r.ok){ const j=await r.json(); const rows=j&&j.Data&&j.Data.Data; v=rows&&rows.length?rows[rows.length-1].close:null; }
+    log(`CryptoCompare: HTTP ${r.status} → ${v!=null?('$'+v+'  ✅ working'):'null'}`);
+  }catch(e){ log(`CryptoCompare: FETCH ERROR → ${e.message}  ← browser is blocking this`); }
+  log('— end self-test · if Coinbase shows a $ price, click “Fetch missing prices” and let it run —');
 }
 async function fetchPrices(){
   // only fetch prices the current classification actually needs — skip review/ignore/transfer/spam
