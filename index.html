@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:,">
 <title>EVM Crypto Tax Worksheet — US</title>
 <style>
   :root{
@@ -182,18 +183,48 @@ const CG_IDS = {
 // treat as $1.00 (skip API)
 const STABLES = new Set(['USDC','USDC.E','USDT','DAI','USDS','TUSD','FRAX','USDE','GUSD','LUSD','USDD','PYUSD']);
 
-let S = loadState();
+let S = blankState(); // populated on boot
 
-/* ---------- state ---------- */
+/* ---------- state ----------
+   Small/irreplaceable data (keys, wallets, classifications) -> localStorage.
+   Bulk/regenerable data (legs + price cache) -> IndexedDB (no 5MB cap). */
 function blankState(){
   return { keys:{etherscan:'',cg:''}, taxYear:new Date().getFullYear()-1,
            wallets:[], legs:[], cls:{}, prices:{}, priceOverride:{} };
 }
-function loadState(){
-  try{ const s=JSON.parse(localStorage.getItem('cryptotax')||'null'); return s?Object.assign(blankState(),s):blankState(); }
-  catch(e){ return blankState(); }
+const META_KEYS=['keys','taxYear','wallets','cls','priceOverride'];
+function loadMeta(){
+  try{ const m=JSON.parse(localStorage.getItem('cryptotax_meta')||'null');
+    if(m) META_KEYS.forEach(k=>{ if(m[k]!==undefined) S[k]=m[k]; }); }catch(e){}
 }
-function save(){ localStorage.setItem('cryptotax', JSON.stringify(S)); }
+function saveMeta(){
+  const m={}; META_KEYS.forEach(k=>m[k]=S[k]);
+  try{ localStorage.setItem('cryptotax_meta', JSON.stringify(m)); }
+  catch(e){ console.warn('meta save failed',e); }
+}
+function save(){ saveMeta(); } // UI handlers touch meta only
+
+/* IndexedDB for legs + price cache */
+function idb(){ return new Promise((res,rej)=>{ const r=indexedDB.open('cryptotax_db',1);
+  r.onupgradeneeded=()=>r.result.createObjectStore('bulk'); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function idbSet(k,v){ const db=await idb(); return new Promise((res,rej)=>{ const t=db.transaction('bulk','readwrite'); t.objectStore('bulk').put(v,k); t.oncomplete=()=>res(); t.onerror=()=>rej(t.error); }); }
+async function idbGet(k){ const db=await idb(); return new Promise((res,rej)=>{ const t=db.transaction('bulk','readonly'); const q=t.objectStore('bulk').get(k); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); }
+async function idbClear(){ const db=await idb(); return new Promise((res)=>{ const t=db.transaction('bulk','readwrite'); t.objectStore('bulk').clear(); t.oncomplete=()=>res(); }); }
+async function loadBulk(){ try{ S.legs=(await idbGet('legs'))||[]; S.prices=(await idbGet('prices'))||{}; }catch(e){ S.legs=[]; S.prices={}; } }
+async function saveBulk(){ try{ await idbSet('legs',S.legs); await idbSet('prices',S.prices); }catch(e){ console.warn('bulk save failed',e); alert('Could not save transaction cache: '+e.message); } }
+
+/* one-time migration from the old single-key (cryptotax) format */
+async function migrateOld(){
+  const old=localStorage.getItem('cryptotax');
+  if(!old || localStorage.getItem('cryptotax_meta')) return false;
+  try{ const o=JSON.parse(old);
+    META_KEYS.forEach(k=>{ if(o[k]!==undefined) S[k]=o[k]; });
+    if(o.prices){ S.prices=o.prices; await idbSet('prices',S.prices); } // keep price cache
+    saveMeta();
+    localStorage.removeItem('cryptotax'); // legs dropped: old IDs were non-deterministic; a fresh pull dedupes cleanly
+    return true;
+  }catch(e){ return false; }
+}
 
 /* ---------- helpers ---------- */
 const lc = a => (a||'').toLowerCase();
@@ -277,6 +308,7 @@ async function pullAll(){
   if(!S.wallets.length){ alert('Add at least one wallet in step 2.'); return; }
   document.getElementById('pullBtn').disabled=true;
   document.getElementById('log').textContent='';
+  resetLegSeq();
   const legs=[]; const tasks=[];
   for(const w of S.wallets) for(const cid of Object.keys(CHAINS)) tasks.push([w,+cid]);
   let done=0;
@@ -307,7 +339,7 @@ async function pullAll(){
         // gas: only when this wallet was the sender (from==wallet) and tx not failed
         if(lc(t.from)===lc(w.address) && t.isError!=='1'){
           const gas=((+t.gasUsed)*(+t.gasPrice))/1e18;
-          legs.push({ ...legBase(cid,w.address,t.hash,+t.timeStamp), token:'ETH', contract:'native', qty:gas, dir:'gas', from:lc(t.from), to:lc(t.to) });
+          legs.push({ id:legId(cid,w.address,t.hash,'ETH','native','gas',gas), chain:cid, wallet:lc(w.address), hash:t.hash, ts:+t.timeStamp, token:'ETH', contract:'native', qty:gas, dir:'gas', from:lc(t.from), to:lc(t.to) });
         }
       }
       // internal ETH (contract-sent)
@@ -319,18 +351,25 @@ async function pullAll(){
     }catch(e){ log('  ! '+cname+': '+e.message); }
     done++; setProgress(done/tasks.length);
   }
-  // merge (dedupe by leg id)
+  // merge (dedupe by deterministic leg id — re-pulls no longer duplicate)
   const seen=new Set(S.legs.map(l=>l.id));
   for(const l of legs) if(!seen.has(l.id)){ S.legs.push(l); seen.add(l.id); }
-  save(); setProgress(null);
+  saveMeta(); await saveBulk(); setProgress(null);
   log(`Done. ${S.legs.length} total legs cached.`);
   document.getElementById('pullBtn').disabled=false;
   document.getElementById('legCount').textContent=`${S.legs.length} legs across ${S.wallets.length} wallet(s).`;
   recompute();
 }
-function legBase(cid,wallet,hash,ts){ return { id:[cid,lc(wallet),hash,ts].join('|')+'#'+Math.random().toString(36).slice(2,7), chain:cid, wallet:lc(wallet), hash, ts }; }
+let _legSeq={};
+function resetLegSeq(){ _legSeq={}; }
+function legId(cid,wallet,hash,token,contract,dir,qty){
+  const base=[cid,hash,lc(wallet),token,contract,dir,Math.round(qty*1e8)].join('|');
+  const n=(_legSeq[base]=(_legSeq[base]||0)+1);
+  return base+'#'+n;
+}
 function mkLeg(cid,wallet,hash,ts,token,contract,qty,dir,from,to){
-  return { ...legBase(cid,wallet,hash,ts), token:token.toUpperCase(), contract, qty, dir, from, to };
+  token=token.toUpperCase();
+  return { id:legId(cid,wallet,hash,token,contract,dir,qty), chain:cid, wallet:lc(wallet), hash, ts, token, contract, qty, dir, from, to };
 }
 
 /* ============================================================
@@ -424,10 +463,10 @@ async function fetchPrices(){
       const usd=await cgHistorical(info); if(usd!=null){ S.prices[okey]=usd; }
       else log(`  ? no price: ${info.token} ${dateUTC(info.ts)} — set manually in Events tab.`);
     }catch(e){ log(`  ! ${info.token} ${dateUTC(info.ts)}: ${e.message}`); }
-    i++; setProgress(i/items.length); save();
+    i++; setProgress(i/items.length); if(i%15===0) await saveBulk();
     await sleep(S.keys.cg?1300:2300);
   }
-  setProgress(null); log('Price fetch complete.'); recompute();
+  await saveBulk(); setProgress(null); log('Price fetch complete.'); recompute();
 }
 async function cgResolveId(info){
   if(info.token==='ETH'||info.token==='WETH') return info.token==='ETH'?'ethereum':'weth';
@@ -726,13 +765,19 @@ function exportCSV(){
   downloadFile(`form8949_${S.taxYear}.csv`,csv,'text/csv');
 }
 function exportState(){ downloadFile('crypto-tax-backup.json',JSON.stringify(S),'application/json'); }
-function importState(e){ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ try{ S=Object.assign(blankState(),JSON.parse(r.result)); save(); location.reload(); }catch(err){alert('Bad file.');} }; r.readAsText(f); }
+function importState(e){ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=async()=>{ try{ S=Object.assign(blankState(),JSON.parse(r.result)); saveMeta(); await saveBulk(); location.reload(); }catch(err){alert('Bad file.');} }; r.readAsText(f); }
 function downloadFile(name,content,type){ const b=new Blob([content],{type}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=name; a.click(); }
-function resetAll(){ if(confirm('Delete all cached data, wallets, classifications and prices from this browser?')){ localStorage.removeItem('cryptotax'); location.reload(); } }
+function resetAll(){ if(confirm('Delete all cached data, wallets, classifications and prices from this browser?')){ localStorage.removeItem('cryptotax'); localStorage.removeItem('cryptotax_meta'); idbClear().finally(()=>location.reload()); } }
 
 /* ---------- boot ---------- */
-initYears(); hydrateKeys(); renderWallets(); recompute();
-if(S.legs.length) document.getElementById('legCount').textContent=`${S.legs.length} legs cached.`;
+(async function boot(){
+  loadMeta();
+  const migrated = await migrateOld();
+  await loadBulk();
+  initYears(); hydrateKeys(); renderWallets(); recompute();
+  if(S.legs.length) document.getElementById('legCount').textContent=`${S.legs.length} legs cached.`;
+  if(migrated) log('Upgraded storage format. Your wallets, classifications and prices were kept — click "Pull transactions" once to re-index (it won\u2019t duplicate now).');
+})();
 </script>
 </body>
 </html>
