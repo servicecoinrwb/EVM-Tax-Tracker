@@ -730,7 +730,7 @@ function setCpLabel(i,v){ if(!RV)return; const c=RV.cpList[i].c; if(v) S.cpLabel
 function renderEvents(){
   const q=(window._evq||'').toLowerCase().trim();
   let evs=CURRENT.events;
-  if(q) evs=evs.filter(ev=> ev.type.includes(q) || ev.hash.toLowerCase().includes(q) || (ev.counter||'').includes(q) ||
+  if(q) evs=evs.filter(ev=> ev.type.includes(q) || ev.hash.toLowerCase().includes(q) || (ev.counter||'').includes(q) || dateUTC(ev.ts).includes(q) ||
     [...ev.outs,...ev.ins].some(l=>l.token.toLowerCase().includes(q)) || (S.cpLabels[ev.counter]||'').toLowerCase().includes(q));
   document.getElementById('tab-events').innerHTML=
     `<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
