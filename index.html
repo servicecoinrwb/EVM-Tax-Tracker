@@ -738,14 +738,17 @@ function renderReview(){
   for(const ev of evs){ const seen=new Set(); for(const lg of [...ev.outs,...ev.ins]){ const t=lg.token; const g=byTok[t]=byTok[t]||{t,count:0,inOnly:true}; if(!seen.has(t)){g.count++;seen.add(t);} if(ev.outs.length) g.inOnly=false; } }
   const tokList=Object.values(byTok).sort((a,b)=>b.count-a.count);
 
-  RV={cpList,tokList,evs};
+  const hasNonStable=g=>Object.keys(g.tokens).some(t=>!STABLES.has((t||'').toUpperCase()));
+  const moneyOnly=!!window._cpMoney;
+  const cpShown = moneyOnly ? cpList.filter(g=>g.inN===0 && g.outN>0 && hasNonStable(g)) : cpList;
+  RV={cpList:cpShown,tokList,evs};
   const bulkSel=(id,sug)=>`<select class="miniSelect" id="${id}"><option value="">— set all to —</option>`+
     Object.entries(TYPE_OPTIONS).filter(([k])=>!k.startsWith('review')).map(([k,o])=>`<option value="${k}" ${sug===k?'selected':''}>${o.label}</option>`).join('')+`</select>`;
 
   const topN=cpList.slice(0,15).reduce((s,g)=>s+g.count,0);
   const hintPill=h=> h==='round-trip'?'<span class="pill transfer">round-trip</span>':h==='in only'?'<span class="pill income">in only</span>':'<span class="pill taxable">out only</span>';
 
-  const cpRows=cpList.slice(0,120).map((g,i)=>{
+  const cpRows=cpShown.slice(0,120).map((g,i)=>{
     const toks=Object.keys(g.tokens).slice(0,5).map(escapeHtml).join(', ');
     const isUnknown=g.c.startsWith('(');
     const link=isUnknown?g.c:`<a class="hash" href="https://blockscan.com/address/${g.c}" target="_blank">${shortA(g.c)} ↗</a>`;
@@ -764,9 +767,12 @@ function renderReview(){
      <span class="pill transfer">round-trip</span> = same asset went out and came back → bridge / LP / lending / CEX → almost always <em>Transfer</em> (I’ve pre-selected it).
      <span class="pill income">in only</span> you never sent = likely a reward (Income) or spam (Ignore).
      <span class="pill taxable">out only</span> = a real sale, a spend, or a one-way move.</div>
-   <details open><summary>By counterparty — ${cpList.length} addresses</summary>
+   <details open><summary>By counterparty — ${moneyOnly?cpShown.length+' of '+cpList.length:cpList.length} addresses</summary>
+     <label style="display:flex;align-items:center;gap:8px;margin:10px 0;font-size:13px;cursor:pointer">
+       <input type="checkbox" ${moneyOnly?'checked':''} onchange="window._cpMoney=this.checked;renderReview()" style="width:auto">
+       <strong>Only show counterparties that can change my taxes</strong> <span class="hint" style="margin:0">(out-only, holding a non-stablecoin — this is where real sales hide)</span></label>
      <div class="scrolly" style="margin-top:8px"><table>
-       <tr><th>Counterparty</th><th class="num">Events</th><th>Pattern</th><th>Tokens</th><th>Set all</th></tr>${cpRows}</table></div></details>
+       <tr><th>Counterparty</th><th class="num">Events</th><th>Pattern</th><th>Tokens</th><th>Set all</th></tr>${cpRows||'<tr><td colspan="5" class="hint">No out-only counterparties hold a non-stablecoin. Your 2025 capital gain is $0 — everything left is stablecoin movement that nets to zero.</td></tr>'}</table></div></details>
    <details style="margin-top:14px"><summary>By token — ${tokList.length} tokens (spam lives here)</summary>
      <div class="scrolly" style="margin-top:8px"><table>
        <tr><th>Token</th><th class="num">Events</th><th>Set all</th></tr>${tokRows}</table></div></details>
