@@ -143,6 +143,7 @@
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <button id="pullBtn" onclick="pullAll()">Pull transactions</button>
       <button class="ghost" onclick="fetchPrices()">Fetch missing prices</button>
+      <button class="danger" onclick="clearTransactions()">Clear transactions</button>
       <span id="legCount" class="hint" style="margin:0"></span>
     </div>
     <div class="progress hidden" id="progWrap"><div id="progBar"></div></div>
@@ -274,7 +275,15 @@ function renderWallets(){
   S.wallets.forEach((w,i)=>{
     const c=document.createElement('span'); c.className='walletChip';
     c.innerHTML=`<strong>${escapeHtml(w.label||'wallet')}</strong><span class="addr">${shortA(w.address)}</span><span class="x" title="remove">✕</span>`;
-    c.querySelector('.x').onclick=()=>{ S.wallets.splice(i,1); save(); renderWallets(); };
+    c.querySelector('.x').onclick=async ()=>{
+      if(!confirm(`Remove ${w.label||'wallet'} and delete its cached transactions?`)) return;
+      const addr=lc(S.wallets[i].address);
+      S.wallets.splice(i,1);
+      const before=S.legs.length;
+      S.legs=S.legs.filter(l=>l.wallet!==addr);
+      saveMeta(); await saveBulk(); renderWallets(); recompute();
+      toast(`Removed ${w.label}. Purged ${before-S.legs.length} legs.`);
+    };
     el.appendChild(c);
   });
 }
@@ -883,6 +892,12 @@ function exportCSV(){
 function exportState(){ downloadFile('crypto-tax-backup.json',JSON.stringify(S),'application/json'); }
 function importState(e){ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=async()=>{ try{ S=Object.assign(blankState(),JSON.parse(r.result)); saveMeta(); await saveBulk(); location.reload(); }catch(err){alert('Bad file.');} }; r.readAsText(f); }
 function downloadFile(name,content,type){ const b=new Blob([content],{type}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=name; a.click(); }
+async function clearTransactions(){
+  if(!confirm('Delete all cached transactions and prices? Your wallets, keys and classifications stay. You will need to Pull again.')) return;
+  S.legs=[]; S.prices={}; await saveBulk(); recompute();
+  const lc=document.getElementById('legCount'); if(lc) lc.textContent='0 legs cached.';
+  toast('Transactions cleared. Click Pull transactions to re-fetch.');
+}
 function resetAll(){ if(confirm('Delete all cached data, wallets, classifications and prices from this browser?')){ localStorage.removeItem('cryptotax'); localStorage.removeItem('cryptotax_meta'); idbClear().finally(()=>location.reload()); } }
 
 /* ---------- boot ---------- */
