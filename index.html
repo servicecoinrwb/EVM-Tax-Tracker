@@ -671,40 +671,50 @@ function renderReview(){
   if(!evs.length){ el.innerHTML='<p class="hint">Nothing to review — every event is classified. 🎉</p>'; RV=null; return; }
 
   const byCp={};
-  for(const ev of evs){ const c=ev.counter||'(internal/unknown)'; const g=byCp[c]=byCp[c]||{c,count:0,tokens:{}}; g.count++; for(const lg of [...ev.outs,...ev.ins]) g.tokens[lg.token]=(g.tokens[lg.token]||0)+1; }
+  for(const ev of evs){ const c=ev.counter||'(internal/unknown)'; const g=byCp[c]=byCp[c]||{c,count:0,tokens:{},inN:0,outN:0};
+    g.count++; if(ev.outs.length) g.outN++; else g.inN++;
+    for(const lg of [...ev.outs,...ev.ins]) g.tokens[lg.token]=(g.tokens[lg.token]||0)+1; }
   const cpList=Object.values(byCp).sort((a,b)=>b.count-a.count);
+  for(const g of cpList){
+    if(g.inN>0 && g.outN>0){ g.hint='round-trip'; g.suggest='transfer'; }      // bridge / LP / lending / CEX
+    else if(g.outN>0){ g.hint='out only'; g.suggest=''; }                       // sale / spend / transfer
+    else { g.hint='in only'; g.suggest=''; }                                    // income / buy / spam
+  }
 
   const byTok={};
   for(const ev of evs){ const seen=new Set(); for(const lg of [...ev.outs,...ev.ins]){ const t=lg.token; const g=byTok[t]=byTok[t]||{t,count:0,inOnly:true}; if(!seen.has(t)){g.count++;seen.add(t);} if(ev.outs.length) g.inOnly=false; } }
   const tokList=Object.values(byTok).sort((a,b)=>b.count-a.count);
 
   RV={cpList,tokList,evs};
-  const bulkSel=id=>`<select class="miniSelect" id="${id}"><option value="">— set all to —</option>`+
-    Object.entries(TYPE_OPTIONS).filter(([k])=>!k.startsWith('review')).map(([k,o])=>`<option value="${k}">${o.label}</option>`).join('')+`</select>`;
+  const bulkSel=(id,sug)=>`<select class="miniSelect" id="${id}"><option value="">— set all to —</option>`+
+    Object.entries(TYPE_OPTIONS).filter(([k])=>!k.startsWith('review')).map(([k,o])=>`<option value="${k}" ${sug===k?'selected':''}>${o.label}</option>`).join('')+`</select>`;
+
+  const topN=cpList.slice(0,15).reduce((s,g)=>s+g.count,0);
+  const hintPill=h=> h==='round-trip'?'<span class="pill transfer">round-trip</span>':h==='in only'?'<span class="pill income">in only</span>':'<span class="pill taxable">out only</span>';
 
   const cpRows=cpList.slice(0,120).map((g,i)=>{
     const toks=Object.keys(g.tokens).slice(0,5).map(escapeHtml).join(', ');
     const isUnknown=g.c.startsWith('(');
     const link=isUnknown?g.c:`<a class="hash" href="https://arbiscan.io/address/${g.c}" target="_blank">${shortA(g.c)} ↗arb</a> <a class="hash" href="https://etherscan.io/address/${g.c}" target="_blank">↗eth</a>`;
     return `<tr><td>${link}<br><input class="cpNote" placeholder="label (GMX, Aave…)" value="${escapeHtml(S.cpLabels[g.c]||'')}" onchange="setCpLabel(${i},this.value)" style="margin-top:4px;width:150px;font-size:11px;padding:3px 5px"></td>
-      <td class="num">${g.count}</td><td style="font-size:11px;color:var(--muted)">${toks}</td>
-      <td>${bulkSel('cpsel_'+i)} <button class="sky" style="padding:5px 10px" onclick="applyCp(${i})">Apply</button></td></tr>`;
+      <td class="num">${g.count}</td><td>${hintPill(g.hint)}</td><td style="font-size:11px;color:var(--muted)">${toks}</td>
+      <td>${bulkSel('cpsel_'+i,g.suggest)} <button class="sky" style="padding:5px 10px" onclick="applyCp(${i})">Apply</button></td></tr>`;
   }).join('');
 
   const tokRows=tokList.slice(0,120).map((g,i)=>`<tr>
       <td><strong>${escapeHtml(g.t)}</strong> ${g.inOnly?'<span class="pill review">incoming only</span>':''}</td>
       <td class="num">${g.count}</td>
-      <td>${bulkSel('toksel_'+i)} <button class="sky" style="padding:5px 10px" onclick="applyTok(${i})">Apply</button></td></tr>`).join('');
+      <td>${bulkSel('toksel_'+i, g.inOnly?'ignore':'')} <button class="sky" style="padding:5px 10px" onclick="applyTok(${i})">Apply</button></td></tr>`).join('');
 
   el.innerHTML=`
-   <div class="infobox">${evs.length} events need a call — <strong>classify groups, not rows.</strong>
-     “Incoming only” tokens you never sent are almost always spam airdrops → <em>Ignore</em>.
-     A repeated counterparty is usually one protocol: label it once, then set all
-     (LP / lending deposits → <em>Transfer</em>; reward claims → <em>Income</em>; a coin you bought off-chain → <em>Bought</em>).</div>
+   <div class="infobox">${evs.length} events to classify — <strong>your top 15 counterparties cover ${topN} of them (${Math.round(topN/evs.length*100)}%)</strong>, so ~15 labels clears most of this.
+     <span class="pill transfer">round-trip</span> = same asset went out and came back → bridge / LP / lending / CEX → almost always <em>Transfer</em> (I’ve pre-selected it).
+     <span class="pill income">in only</span> you never sent = likely a reward (Income) or spam (Ignore).
+     <span class="pill taxable">out only</span> = a real sale, a spend, or a one-way move.</div>
    <details open><summary>By counterparty — ${cpList.length} addresses</summary>
      <div class="scrolly" style="margin-top:8px"><table>
-       <tr><th>Counterparty</th><th class="num">Events</th><th>Tokens</th><th>Set all</th></tr>${cpRows}</table></div></details>
-   <details style="margin-top:14px"><summary>By token — ${tokList.length} tokens</summary>
+       <tr><th>Counterparty</th><th class="num">Events</th><th>Pattern</th><th>Tokens</th><th>Set all</th></tr>${cpRows}</table></div></details>
+   <details style="margin-top:14px"><summary>By token — ${tokList.length} tokens (spam lives here)</summary>
      <div class="scrolly" style="margin-top:8px"><table>
        <tr><th>Token</th><th class="num">Events</th><th>Set all</th></tr>${tokRows}</table></div></details>
    <details style="margin-top:14px"><summary>Line-by-line (first 300 of ${evs.length})</summary>${eventsTable(evs.slice(0,300))}</details>`;
