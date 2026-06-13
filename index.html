@@ -195,6 +195,10 @@ const CG_IDS = {
   GMX:'gmx', LINK:'chainlink', UNI:'uniswap', AAVE:'aave', CRV:'curve-dao-token',
   LDO:'lido-dao', PEPE:'pepe', MATIC:'matic-network', POL:'matic-network', BNB:'binancecoin'
 };
+// CryptoCompare symbol normalization (deep free history; covers majors back to 2015)
+const CC_BASE = 'https://min-api.cryptocompare.com/data/v2/histoday';
+const CC_SYM = { WETH:'ETH', WBTC:'BTC', WMATIC:'MATIC', WPOL:'POL', POL:'POL', MATIC:'MATIC', WBNB:'BNB' };
+function ccSymbol(token){ const t=(token||'').toUpperCase(); return CC_SYM[t] || t; }
 // treat as $1.00 (skip API)
 const STABLES = new Set(['USDC','USDC.E','USDT','USD₮0','USDT0','DAI','USDS','TUSD','FRAX','USDE','USD0','GUSD','LUSD','USDD','PYUSD','BUSD','USDX','GHO']);
 
@@ -540,13 +544,31 @@ async function cgResolveId(info){
   return null;
 }
 async function cgHistorical(info){
-  const id=await cgResolveId(info); if(!id) return null;
-  const u=new URL(`${CG_BASE}/coins/${id}/history`); u.searchParams.set('date',cgDate(info.ts)); u.searchParams.set('localization','false');
-  if(S.keys.cg)u.searchParams.set('x_cg_demo_api_key',S.keys.cg);
-  const r=await fetch(u);
-  if(r.status===429){ await sleep(4000); return cgHistorical(info); }
-  if(!r.ok) return null;
-  const j=await r.json(); return j&&j.market_data&&j.market_data.current_price?j.market_data.current_price.usd:null;
+  const id=await cgResolveId(info);
+  if(id){
+    const u=new URL(`${CG_BASE}/coins/${id}/history`); u.searchParams.set('date',cgDate(info.ts)); u.searchParams.set('localization','false');
+    if(S.keys.cg)u.searchParams.set('x_cg_demo_api_key',S.keys.cg);
+    const r=await fetch(u);
+    if(r.status===429){ await sleep(4000); return cgHistorical(info); }
+    if(r.ok){ const j=await r.json(); const v=j&&j.market_data&&j.market_data.current_price?j.market_data.current_price.usd:null; if(v!=null) return v; }
+  }
+  // fallback: CryptoCompare daily close (free, deep history past CoinGecko's 365-day free limit)
+  return ccHistorical(info);
+}
+async function ccHistorical(info){
+  const sym=ccSymbol(info.token);
+  const u=new URL(CC_BASE); u.searchParams.set('fsym',sym); u.searchParams.set('tsym','USD');
+  u.searchParams.set('limit','1'); u.searchParams.set('toTs',String(info.ts));
+  try{
+    const r=await fetch(u); if(!r.ok) return null;
+    const j=await r.json();
+    if(j && j.Response==='Success' && j.Data && j.Data.Data && j.Data.Data.length){
+      const rows=j.Data.Data, row=rows[rows.length-1];
+      const c=row.close; // 0 means CryptoCompare has no data for that symbol/day
+      return (c && c>0) ? c : null;
+    }
+  }catch(e){}
+  return null;
 }
 
 /* ============================================================
