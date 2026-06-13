@@ -552,8 +552,30 @@ async function cgHistorical(info){
     if(r.status===429){ await sleep(4000); return cgHistorical(info); }
     if(r.ok){ const j=await r.json(); const v=j&&j.market_data&&j.market_data.current_price?j.market_data.current_price.usd:null; if(v!=null) return v; }
   }
-  // fallback: CryptoCompare daily close (free, deep history past CoinGecko's 365-day free limit)
+  // fallback chain (deep history past CoinGecko's 365-day free wall):
+  // 1) Coinbase spot-by-date (keyless, US-friendly, CORS-ok, covers the majors)
+  // 2) CryptoCompare daily close (broader symbol coverage)
+  const cb=await cbHistorical(info); if(cb!=null) return cb;
   return ccHistorical(info);
+}
+// Coinbase covers these reliably with deep history; skip the rest to avoid 404 spam
+const CB_OK = new Set(['ETH','BTC','LINK','ARB','MATIC','POL','UNI','AAVE','CRV','LDO','PEPE','SHIB','APE','IMX','GMX','SOL','AVAX','OP','DOGE','LTC','ATOM','GRT','SAND','MANA','FTM','ENS','SNX','COMP','MKR','SUSHI']);
+const CB_SYM = { WETH:'ETH', WBTC:'BTC', WMATIC:'MATIC', WPOL:'POL', WBNB:'BNB' };
+async function cbHistorical(info){
+  let sym=(CB_SYM[(info.token||'').toUpperCase()] || (info.token||'').toUpperCase());
+  if(!CB_OK.has(sym)) return null;
+  // Coinbase renamed MATIC->POL; try the symbol, then its alias, for older/newer dates
+  const tries = sym==='POL' ? ['POL','MATIC'] : sym==='MATIC' ? ['MATIC','POL'] : [sym];
+  for(const s of tries){
+    try{
+      const r=await fetch(`https://api.coinbase.com/v2/prices/${s}-USD/spot?date=${dateUTC(info.ts)}`);
+      if(!r.ok) continue;
+      const j=await r.json();
+      const a=j&&j.data&&j.data.amount?parseFloat(j.data.amount):null;
+      if(a&&a>0) return a;
+    }catch(e){}
+  }
+  return null;
 }
 async function ccHistorical(info){
   const sym=ccSymbol(info.token);
