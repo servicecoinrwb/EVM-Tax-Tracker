@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EVM Crypto Tax Worksheet — US</title>
+<style>
+  :root{
+    --navy:#0b2545; --navy2:#12325c; --sky:#5fa8d3; --cream:#f7f3e9;
+    --paper:#fffdf7; --ink:#1a2230; --rust:#b5532a; --rust-bg:#fbe9e0;
+    --green:#2f6f4f; --green-bg:#e4f0e8; --line:#d9d2c1; --muted:#6b7385;
+    --mono:"SF Mono",ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--cream);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.45}
+  header{background:var(--navy);color:#fff;padding:18px 24px;border-bottom:4px solid var(--sky)}
+  header h1{margin:0;font-size:20px;letter-spacing:.3px;font-weight:700}
+  header .sub{color:#b9c8de;font-size:12.5px;margin-top:3px}
+  .wrap{max-width:1180px;margin:0 auto;padding:20px 24px 80px}
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:18px 20px;margin-bottom:18px}
+  .card h2{margin:0 0 4px;font-size:15px;color:var(--navy);text-transform:uppercase;letter-spacing:.6px}
+  .card h2 .step{display:inline-block;background:var(--navy);color:#fff;border-radius:5px;font-size:11px;padding:2px 7px;margin-right:8px;vertical-align:middle}
+  .card .hint{color:var(--muted);font-size:12.5px;margin:0 0 14px}
+  label{display:block;font-size:11.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:0 0 4px;font-weight:600}
+  input,select{font-family:var(--sans);font-size:13.5px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink);width:100%}
+  input:focus,select:focus{outline:2px solid var(--sky);outline-offset:-1px;border-color:var(--sky)}
+  input[type=checkbox]{width:auto}
+  .row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:12px}
+  .row3{display:grid;grid-template-columns:2fr 2fr 1fr auto;gap:12px;align-items:end;margin-bottom:10px}
+  button{font-family:var(--sans);font-weight:600;font-size:13px;border:none;border-radius:6px;padding:9px 16px;cursor:pointer;background:var(--navy);color:#fff}
+  button:hover{background:var(--navy2)}
+  button.ghost{background:#fff;color:var(--navy);border:1px solid var(--navy)}
+  button.ghost:hover{background:#eef3f8}
+  button.sky{background:var(--sky);color:var(--navy)}
+  button.danger{background:#fff;color:var(--rust);border:1px solid var(--rust)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .walletList{margin:6px 0 12px}
+  .walletChip{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:20px;padding:5px 12px;margin:4px 6px 4px 0;font-size:12.5px}
+  .walletChip .addr{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  .walletChip .x{cursor:pointer;color:var(--rust);font-weight:700}
+  .pill{display:inline-block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:2px 7px;border-radius:4px}
+  .pill.eth{background:#e7edf6;color:#34507e}
+  .pill.arb{background:#e3eef5;color:#1f6f96}
+  .pill.taxable{background:var(--rust-bg);color:var(--rust)}
+  .pill.income{background:#efe7f6;color:#6a3b8f}
+  .pill.transfer{background:var(--green-bg);color:var(--green)}
+  .pill.review{background:#fdf3d8;color:#8a6d1d}
+  .pill.ignore{background:#ececec;color:#777}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{text-align:left;background:var(--navy);color:#fff;padding:8px 9px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;position:sticky;top:0}
+  td{padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:middle}
+  tr:hover td{background:#fbf8ef}
+  .num{font-family:var(--mono);text-align:right;white-space:nowrap}
+  .hash{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .scrollx{overflow-x:auto}
+  .scrolly{max-height:520px;overflow-y:auto;border:1px solid var(--line);border-radius:6px}
+  .tabbar{display:flex;gap:4px;margin-bottom:14px;flex-wrap:wrap}
+  .tabbar button{background:#fff;color:var(--navy);border:1px solid var(--line)}
+  .tabbar button.active{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .stat{display:inline-block;min-width:150px;margin:0 18px 10px 0}
+  .stat .v{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--navy)}
+  .stat .v.neg{color:var(--rust)} .stat .v.pos{color:var(--green)}
+  .stat .l{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+  .miniSelect{font-size:12px;padding:4px 6px;min-width:130px}
+  .priceInput{width:90px;font-family:var(--mono);font-size:12px;text-align:right;padding:4px 6px}
+  .flag{background:var(--rust-bg);color:var(--rust);font-size:11px;padding:2px 7px;border-radius:4px;font-weight:600}
+  .log{font-family:var(--mono);font-size:11.5px;background:#0d1c2e;color:#9fd0a0;padding:10px 12px;border-radius:6px;max-height:160px;overflow:auto;white-space:pre-wrap;margin-top:10px}
+  .warnbox{background:var(--rust-bg);border:1px solid #e6b9a4;border-radius:6px;padding:12px 14px;font-size:12.5px;color:#7a3318;margin-bottom:14px}
+  .infobox{background:#eaf2f8;border:1px solid #b9d3e6;border-radius:6px;padding:12px 14px;font-size:12.5px;color:#234a66;margin-bottom:14px}
+  .hidden{display:none}
+  .progress{height:6px;background:#e4ddcd;border-radius:3px;overflow:hidden;margin-top:8px}
+  .progress > div{height:100%;background:var(--sky);width:0;transition:width .2s}
+  details summary{cursor:pointer;font-weight:600;color:var(--navy);font-size:13px}
+  code{font-family:var(--mono);font-size:12px;background:#eee7d4;padding:1px 5px;border-radius:3px}
+  @media(max-width:760px){.row{grid-template-columns:1fr}.row3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>EVM Crypto Tax Worksheet</h1>
+  <div class="sub">US capital-gains worksheet · wallet-by-wallet FIFO · Ethereum + Arbitrum · Form 8949 / Schedule D draft</div>
+</header>
+
+<div class="wrap">
+
+  <div class="warnbox">
+    <strong>This is a worksheet, not tax advice.</strong> It does a first-pass classification of on-chain activity and computes FIFO
+    gains. DeFi positions (Aave, GMX, LP tokens, vault deposits) are genuinely ambiguous under current IRS guidance and frequently
+    mis-handled by every automated tool — you confirm those in the Review step. Reconcile against any 1099-DA you receive and have a
+    CPA review before filing.
+  </div>
+
+  <!-- STEP 1: KEYS -->
+  <div class="card">
+    <h2><span class="step">1</span>Connect</h2>
+    <p class="hint">Keys stay in this browser only (localStorage). Get a free Etherscan V2 key at etherscan.io/apis — one key covers
+      both chains. CoinGecko demo key is optional but raises the price-lookup rate limit.</p>
+    <div class="row">
+      <div><label>Etherscan V2 API key</label><input id="etherscanKey" placeholder="ABC123..." autocomplete="off"></div>
+      <div><label>CoinGecko demo key (optional)</label><input id="cgKey" placeholder="CG-..." autocomplete="off"></div>
+      <div><label>Tax year</label><select id="taxYear"></select></div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button onclick="saveKeys()">Save keys</button>
+      <button class="ghost" onclick="exportState()">Export data (backup)</button>
+      <label class="ghost" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--navy);border-radius:6px;padding:9px 16px;cursor:pointer;color:var(--navy);text-transform:none;letter-spacing:0;font-weight:600">
+        Import data<input type="file" id="importFile" class="hidden" accept="application/json" onchange="importState(event)">
+      </label>
+      <button class="danger" onclick="resetAll()">Reset everything</button>
+    </div>
+  </div>
+
+  <!-- STEP 2: WALLETS -->
+  <div class="card">
+    <h2><span class="step">2</span>Your wallets</h2>
+    <p class="hint">Add every address you control. Transfers <em>between</em> these (including bridging ETH→Arbitrum) are treated as
+      non-taxable moves that carry cost basis. Anything to/from an address not listed here is treated as an external party.</p>
+    <div class="row3">
+      <div><label>Wallet address (0x…)</label><input id="newAddr" placeholder="0x..." autocomplete="off"></div>
+      <div><label>Label</label><input id="newLabel" placeholder="e.g. Main, SCALPER, Conservator"></div>
+      <div><label>&nbsp;</label><button class="sky" onclick="addWallet()" style="width:100%">Add wallet</button></div>
+      <div></div>
+    </div>
+    <div class="walletList" id="walletList"></div>
+  </div>
+
+  <!-- STEP 3: PULL -->
+  <div class="card">
+    <h2><span class="step">3</span>Pull on-chain history</h2>
+    <p class="hint">Fetches full history (all years) so cost basis is correct, across Ethereum + Arbitrum. Heavy DeFi wallets can take a
+      minute. Re-running merges with what's cached.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <button id="pullBtn" onclick="pullAll()">Pull transactions</button>
+      <button class="ghost" onclick="fetchPrices()">Fetch missing prices</button>
+      <span id="legCount" class="hint" style="margin:0"></span>
+    </div>
+    <div class="progress hidden" id="progWrap"><div id="progBar"></div></div>
+    <div class="log hidden" id="log"></div>
+  </div>
+
+  <!-- STEP 4: REVIEW + RESULTS -->
+  <div class="card" id="resultsCard">
+    <h2><span class="step">4</span>Review &amp; results</h2>
+    <div class="tabbar" id="tabbar">
+      <button class="active" onclick="showTab('summary',this)">Summary</button>
+      <button onclick="showTab('review',this)">Review queue</button>
+      <button onclick="showTab('events',this)">All events</button>
+      <button onclick="showTab('f8949',this)">Form 8949</button>
+      <button onclick="showTab('income',this)">Income</button>
+    </div>
+
+    <div id="tab-summary"></div>
+    <div id="tab-review" class="hidden"></div>
+    <div id="tab-events" class="hidden"></div>
+    <div id="tab-f8949" class="hidden"></div>
+    <div id="tab-income" class="hidden"></div>
+  </div>
+
+</div>
+
+<script>
+/* ============================================================
+   EVM Crypto Tax Worksheet — US
+   Wallet-by-wallet FIFO (Rev. Proc. 2024-28). Local only.
+   ============================================================ */
+
+const CHAINS = {
+  1:     {key:'eth', name:'Ethereum',  cgPlatform:'ethereum'},
+  42161: {key:'arb', name:'Arbitrum',  cgPlatform:'arbitrum-one'},
+};
+const SECONDS_LONG = 365*24*60*60; // long-term threshold (>1 year)
+const ETHERSCAN_BASE = 'https://api.etherscan.io/v2/api';
+const CG_BASE = 'https://api.coingecko.com/api/v3';
+
+// token symbol -> coingecko id (best-effort; contract lookup is the fallback)
+const CG_IDS = {
+  ETH:'ethereum', WETH:'weth', WBTC:'wrapped-bitcoin', ARB:'arbitrum',
+  GMX:'gmx', LINK:'chainlink', UNI:'uniswap', AAVE:'aave', CRV:'curve-dao-token',
+  LDO:'lido-dao', PEPE:'pepe', MATIC:'matic-network'
+};
+// treat as $1.00 (skip API)
+const STABLES = new Set(['USDC','USDC.E','USDT','DAI','USDS','TUSD','FRAX','USDE','GUSD','LUSD','USDD','PYUSD']);
+
+let S = loadState();
+
+/* ---------- state ---------- */
+function blankState(){
+  return { keys:{etherscan:'',cg:''}, taxYear:new Date().getFullYear()-1,
+           wallets:[], legs:[], cls:{}, prices:{}, priceOverride:{} };
+}
+function loadState(){
+  try{ const s=JSON.parse(localStorage.getItem('cryptotax')||'null'); return s?Object.assign(blankState(),s):blankState(); }
+  catch(e){ return blankState(); }
+}
+function save(){ localStorage.setItem('cryptotax', JSON.stringify(S)); }
+
+/* ---------- helpers ---------- */
+const lc = a => (a||'').toLowerCase();
+const fmtUSD = n => (n<0?'-':'')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtQty = n => Number(n).toLocaleString('en-US',{maximumFractionDigits:8});
+const shortA = a => a.slice(0,6)+'…'+a.slice(-4);
+const dateUTC = ts => new Date(ts*1000).toISOString().slice(0,10);
+const cgDate = ts => { const d=new Date(ts*1000); const p=x=>String(x).padStart(2,'0'); return p(d.getUTCDate())+'-'+p(d.getUTCMonth()+1)+'-'+d.getUTCFullYear(); };
+function myAddrs(){ return new Set(S.wallets.map(w=>lc(w.address))); }
+function log(msg){ const el=document.getElementById('log'); el.classList.remove('hidden'); el.textContent += msg+'\n'; el.scrollTop=el.scrollHeight; }
+function setProgress(p){ const w=document.getElementById('progWrap'),b=document.getElementById('progBar'); if(p==null){w.classList.add('hidden');return;} w.classList.remove('hidden'); b.style.width=Math.round(p*100)+'%'; }
+
+/* ---------- init UI ---------- */
+function initYears(){
+  const sel=document.getElementById('taxYear'); const now=new Date().getFullYear();
+  for(let y=now;y>=2017;y--){ const o=document.createElement('option'); o.value=y;o.textContent=y; sel.appendChild(o);}
+  sel.value=S.taxYear; sel.onchange=()=>{S.taxYear=+sel.value;save();recompute();};
+}
+function hydrateKeys(){
+  document.getElementById('etherscanKey').value=S.keys.etherscan||'';
+  document.getElementById('cgKey').value=S.keys.cg||'';
+}
+function saveKeys(){
+  S.keys.etherscan=document.getElementById('etherscanKey').value.trim();
+  S.keys.cg=document.getElementById('cgKey').value.trim(); save(); toast('Keys saved.');
+}
+function toast(m){ log(m); }
+
+/* ---------- wallets ---------- */
+function renderWallets(){
+  const el=document.getElementById('walletList'); el.innerHTML='';
+  if(!S.wallets.length){ el.innerHTML='<span class="hint">No wallets yet.</span>'; return; }
+  S.wallets.forEach((w,i)=>{
+    const c=document.createElement('span'); c.className='walletChip';
+    c.innerHTML=`<strong>${escapeHtml(w.label||'wallet')}</strong><span class="addr">${shortA(w.address)}</span><span class="x" title="remove">✕</span>`;
+    c.querySelector('.x').onclick=()=>{ S.wallets.splice(i,1); save(); renderWallets(); };
+    el.appendChild(c);
+  });
+}
+function addWallet(){
+  const a=document.getElementById('newAddr').value.trim(); const l=document.getElementById('newLabel').value.trim();
+  if(!/^0x[a-fA-F0-9]{40}$/.test(a)){ alert('Enter a valid 0x address (40 hex chars).'); return; }
+  if(myAddrs().has(lc(a))){ alert('Already added.'); return; }
+  S.wallets.push({address:a,label:l||('wallet '+(S.wallets.length+1))}); save();
+  document.getElementById('newAddr').value=''; document.getElementById('newLabel').value=''; renderWallets();
+}
+function escapeHtml(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* ============================================================
+   PULL: Etherscan V2 (txlist, txlistinternal, tokentx)
+   ============================================================ */
+async function esCall(chainid, params){
+  const u=new URL(ETHERSCAN_BASE);
+  u.searchParams.set('chainid',chainid);
+  Object.entries(params).forEach(([k,v])=>u.searchParams.set(k,v));
+  u.searchParams.set('apikey',S.keys.etherscan);
+  const r=await fetch(u); const j=await r.json();
+  if(j.status==='0' && j.message && j.message!=='No transactions found' && !Array.isArray(j.result)){
+    if(/rate limit/i.test(j.result||'')) { await sleep(1100); return esCall(chainid,params); }
+    throw new Error(j.result||j.message);
+  }
+  return Array.isArray(j.result)?j.result:[];
+}
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+async function pagedFetch(chainid, action, addr){
+  // page by block to get >10k records
+  let all=[], startblock=0; const PAGE=10000;
+  for(let guard=0; guard<50; guard++){
+    const rows=await esCall(chainid,{module:'account',action,address:addr,startblock,endblock:99999999,sort:'asc',offset:PAGE,page:1});
+    all=all.concat(rows);
+    if(rows.length<PAGE) break;
+    startblock = (+rows[rows.length-1].blockNumber)+1;
+    await sleep(250);
+  }
+  return all;
+}
+
+async function pullAll(){
+  if(!S.keys.etherscan){ alert('Add your Etherscan key in step 1.'); return; }
+  if(!S.wallets.length){ alert('Add at least one wallet in step 2.'); return; }
+  document.getElementById('pullBtn').disabled=true;
+  document.getElementById('log').textContent='';
+  const legs=[]; const tasks=[];
+  for(const w of S.wallets) for(const cid of Object.keys(CHAINS)) tasks.push([w,+cid]);
+  let done=0;
+  for(const [w,cid] of tasks){
+    const cname=CHAINS[cid].name;
+    try{
+      log(`Pulling ${w.label} on ${cname}…`);
+      const [tok, nat, intl] = [
+        await pagedFetch(cid,'tokentx',w.address),
+        await pagedFetch(cid,'txlist',w.address),
+        await pagedFetch(cid,'txlistinternal',w.address),
+      ];
+      // ERC-20 legs
+      for(const t of tok){
+        const dir = lc(t.to)===lc(w.address)?'in':(lc(t.from)===lc(w.address)?'out':null);
+        if(!dir) continue;
+        const dec=+t.tokenDecimal||18;
+        legs.push(mkLeg(cid,w.address,t.hash,+t.timeStamp,t.tokenSymbol||'?',lc(t.contractAddress),
+                        (+t.value)/Math.pow(10,dec), dir, lc(t.from), lc(t.to)));
+      }
+      // native ETH value transfers
+      for(const t of nat){
+        const v=(+t.value)/1e18;
+        if(v>0){
+          if(lc(t.to)===lc(w.address)) legs.push(mkLeg(cid,w.address,t.hash,+t.timeStamp,'ETH','native',v,'in',lc(t.from),lc(t.to)));
+          if(lc(t.from)===lc(w.address)) legs.push(mkLeg(cid,w.address,t.hash,+t.timeStamp,'ETH','native',v,'out',lc(t.from),lc(t.to)));
+        }
+        // gas: only when this wallet was the sender (from==wallet) and tx not failed
+        if(lc(t.from)===lc(w.address) && t.isError!=='1'){
+          const gas=((+t.gasUsed)*(+t.gasPrice))/1e18;
+          legs.push({ ...legBase(cid,w.address,t.hash,+t.timeStamp), token:'ETH', contract:'native', qty:gas, dir:'gas', from:lc(t.from), to:lc(t.to) });
+        }
+      }
+      // internal ETH (contract-sent)
+      for(const t of intl){
+        const v=(+t.value)/1e18; if(v<=0||t.isError==='1') continue;
+        if(lc(t.to)===lc(w.address)) legs.push(mkLeg(cid,w.address,t.hash,+t.timeStamp,'ETH','native',v,'in',lc(t.from),lc(t.to)));
+        if(lc(t.from)===lc(w.address)) legs.push(mkLeg(cid,w.address,t.hash,+t.timeStamp,'ETH','native',v,'out',lc(t.from),lc(t.to)));
+      }
+    }catch(e){ log('  ! '+cname+': '+e.message); }
+    done++; setProgress(done/tasks.length);
+  }
+  // merge (dedupe by leg id)
+  const seen=new Set(S.legs.map(l=>l.id));
+  for(const l of legs) if(!seen.has(l.id)){ S.legs.push(l); seen.add(l.id); }
+  save(); setProgress(null);
+  log(`Done. ${S.legs.length} total legs cached.`);
+  document.getElementById('pullBtn').disabled=false;
+  document.getElementById('legCount').textContent=`${S.legs.length} legs across ${S.wallets.length} wallet(s).`;
+  recompute();
+}
+function legBase(cid,wallet,hash,ts){ return { id:[cid,lc(wallet),hash,ts].join('|')+'#'+Math.random().toString(36).slice(2,7), chain:cid, wallet:lc(wallet), hash, ts }; }
+function mkLeg(cid,wallet,hash,ts,token,contract,qty,dir,from,to){
+  return { ...legBase(cid,wallet,hash,ts), token:token.toUpperCase(), contract, qty, dir, from, to };
+}
+
+/* ============================================================
+   GROUP legs into per-(wallet,hash) EVENTS + auto-classify
+   ============================================================ */
+function buildEvents(){
+  const mine=myAddrs();
+  // group by wallet+hash
+  const groups={};
+  for(const l of S.legs){
+    if(l.dir==='gas') continue; // gas handled separately
+    const k=l.wallet+'|'+l.hash;
+    (groups[k]=groups[k]||[]).push(l);
+  }
+  // gas per wallet+hash
+  const gasMap={};
+  for(const l of S.legs) if(l.dir==='gas'){ const k=l.wallet+'|'+l.hash; gasMap[k]=(gasMap[k]||0)+l.qty; }
+
+  const events=[];
+  for(const k of Object.keys(groups)){
+    const ls=groups[k]; const [wallet,hash]=k.split('|'); const cid=ls[0].chain; const ts=Math.min(...ls.map(x=>x.ts));
+    // net per token+dir
+    const net={};
+    for(const l of ls){ const kk=l.token+'|'+l.contract+'|'+l.dir; net[kk]=net[kk]||{token:l.token,contract:l.contract,dir:l.dir,qty:0,from:l.from,to:l.to}; net[kk].qty+=l.qty; }
+    const outs=Object.values(net).filter(x=>x.dir==='out'&&x.qty>1e-12);
+    const ins =Object.values(net).filter(x=>x.dir==='in' &&x.qty>1e-12);
+    const gasEth=gasMap[k]||0;
+
+    // counterparties
+    const counter = [...outs,...ins].map(x=> x.dir==='out'?x.to:x.from).find(a=>a&&!mine.has(a));
+    const allCounterMine = [...outs,...ins].every(x=> mine.has(x.dir==='out'?x.to:x.from));
+
+    let auto;
+    if(outs.length && ins.length) auto='trade';              // swap: taxable both sides
+    else if(outs.length && !ins.length) auto = allCounterMine ? 'transfer' : 'review_out';
+    else if(ins.length && !outs.length) auto = allCounterMine ? 'transfer' : 'review_in';
+    else continue;
+
+    const id=k;
+    const ev={ id, cid, wallet, hash, ts, outs, ins, gasEth,
+               auto, type: S.cls[id] || auto, counter:counter||'' };
+    events.push(ev);
+  }
+  events.sort((a,b)=>a.ts-b.ts);
+  return events;
+}
+
+/* classification options the user can pick per event */
+const TYPE_OPTIONS = {
+  trade:    {label:'Trade / swap (taxable)', taxable:true},
+  sale:     {label:'Sold for fiat (taxable)', taxable:true},
+  spend:    {label:'Spent / paid out (taxable disposal)', taxable:true},
+  income:   {label:'Income — yield/staking/airdrop (ordinary)', income:true},
+  buy:      {label:'Bought (acquire, basis = price paid)', acquire:true},
+  transfer: {label:'Transfer between my wallets (non-taxable)', transfer:true},
+  gift:     {label:'Gift / non-taxable out', nontax:true},
+  ignore:   {label:'Ignore (spam/dust/airdrop $0)', ignore:true},
+  review_in:{label:'⚠ Needs review (incoming)', review:true},
+  review_out:{label:'⚠ Needs review (outgoing)', review:true},
+};
+
+/* ============================================================
+   PRICES
+   ============================================================ */
+function priceKey(token,contract,ts){ return (contract&&contract!=='native'?contract:token)+'@'+dateUTC(ts); }
+function getPrice(token,contract,ts){
+  const okey=priceKey(token,contract,ts);
+  if(S.priceOverride[okey]!=null) return {usd:S.priceOverride[okey],src:'manual'};
+  if(STABLES.has(token)) return {usd:1,src:'stable'};
+  if(S.prices[okey]!=null) return {usd:S.prices[okey],src:'cg'};
+  return {usd:null,src:null};
+}
+async function fetchPrices(){
+  // collect unique (token,contract,date) that lack a price and are needed (taxable legs in any year — basis needs all)
+  const events=buildEvents(); const need=new Map();
+  for(const ev of events){
+    for(const leg of [...ev.outs,...ev.ins]){
+      if(STABLES.has(leg.token)) continue;
+      const okey=priceKey(leg.token,leg.contract,ev.ts);
+      if(getPrice(leg.token,leg.contract,ev.ts).usd!=null) continue;
+      need.set(okey,{token:leg.token,contract:leg.contract,ts:ev.ts,cid:ev.cid});
+    }
+    if(ev.gasEth>0){ const okey=priceKey('ETH','native',ev.ts); if(getPrice('ETH','native',ev.ts).usd==null) need.set(okey,{token:'ETH',contract:'native',ts:ev.ts,cid:ev.cid}); }
+  }
+  const items=[...need.entries()];
+  if(!items.length){ log('No missing prices.'); return; }
+  log(`Fetching ${items.length} daily prices from CoinGecko (throttled)…`);
+  let i=0;
+  for(const [okey,info] of items){
+    try{
+      const usd=await cgHistorical(info); if(usd!=null){ S.prices[okey]=usd; }
+      else log(`  ? no price: ${info.token} ${dateUTC(info.ts)} — set manually in Events tab.`);
+    }catch(e){ log(`  ! ${info.token} ${dateUTC(info.ts)}: ${e.message}`); }
+    i++; setProgress(i/items.length); save();
+    await sleep(S.keys.cg?1300:2300);
+  }
+  setProgress(null); log('Price fetch complete.'); recompute();
+}
+async function cgResolveId(info){
+  if(info.token==='ETH'||info.token==='WETH') return info.token==='ETH'?'ethereum':'weth';
+  if(CG_IDS[info.token]) return CG_IDS[info.token];
+  if(info.contract && info.contract!=='native'){
+    const plat=CHAINS[info.cid].cgPlatform;
+    const u=new URL(`${CG_BASE}/coins/${plat}/contract/${info.contract}`); if(S.keys.cg)u.searchParams.set('x_cg_demo_api_key',S.keys.cg);
+    const r=await fetch(u); if(r.ok){ const j=await r.json(); if(j&&j.id) return j.id; }
+  }
+  return null;
+}
+async function cgHistorical(info){
+  const id=await cgResolveId(info); if(!id) return null;
+  const u=new URL(`${CG_BASE}/coins/${id}/history`); u.searchParams.set('date',cgDate(info.ts)); u.searchParams.set('localization','false');
+  if(S.keys.cg)u.searchParams.set('x_cg_demo_api_key',S.keys.cg);
+  const r=await fetch(u);
+  if(r.status===429){ await sleep(4000); return cgHistorical(info); }
+  if(!r.ok) return null;
+  const j=await r.json(); return j&&j.market_data&&j.market_data.current_price?j.market_data.current_price.usd:null;
+}
+
+/* ============================================================
+   FIFO ENGINE  (per chain|wallet|token ; pending pool for transfers)
+   ============================================================ */
+function computeTax(){
+  const events=buildEvents();
+  const lots={};            // key chain|wallet|TOKEN -> [{qty,basisPerUnit,date}]
+  const pending={};         // TOKEN -> [{qty,basisPerUnit,date}]  (in transit between my wallets/bridges)
+  const f8949=[];           // disposal rows
+  const incomeRows=[];      // ordinary income
+  const flags=[];           // problems
+  const eventResults={};    // id -> {gain, note}
+
+  const lotKey=(cid,wallet,token)=>cid+'|'+wallet+'|'+token;
+  const addLot=(cid,wallet,token,qty,basisPerUnit,date)=>{ const k=lotKey(cid,wallet,token); (lots[k]=lots[k]||[]).push({qty,basisPerUnit,date}); };
+  function consume(cid,wallet,token,qty,date){
+    const k=lotKey(cid,wallet,token); const ls=lots[k]||[]; let need=qty, basis=0; const used=[];
+    while(need>1e-12 && ls.length){
+      const lot=ls[0]; const take=Math.min(lot.qty,need);
+      basis+=take*lot.basisPerUnit; used.push({take,date:lot.date,basisPerUnit:lot.basisPerUnit});
+      lot.qty-=take; need-=take; if(lot.qty<=1e-12) ls.shift();
+    }
+    return {basis,used,short: need>1e-12 ? need : 0};
+  }
+
+  for(const ev of events){
+    const type=ev.type;
+    const opt=TYPE_OPTIONS[type]||{};
+    // allocate gas (USD) to add to basis (acquisitions) or proceeds-reduction (disposals)
+    const gp=getPrice('ETH','native',ev.ts).usd; const gasUSD = ev.gasEth>0 && gp!=null ? ev.gasEth*gp : 0;
+
+    if(opt.ignore){ eventResults[ev.id]={note:'ignored'}; continue; }
+
+    if(opt.transfer){
+      // out legs -> remove FIFO into pending (carry basis+date); in legs -> pull from pending
+      for(const leg of ev.outs){
+        const {used,short}=consume(ev.cid,ev.wallet,leg.token,leg.qty,ev.ts);
+        for(const u of used){ (pending[leg.token]=pending[leg.token]||[]).push({qty:u.take,basisPerUnit:u.basisPerUnit,date:u.date}); }
+        if(short>0) flags.push(`Transfer out of ${fmtQty(short)} ${leg.token} with no tracked basis (${dateUTC(ev.ts)}). Add the source wallet or set basis.`);
+      }
+      for(const leg of ev.ins){
+        let need=leg.qty; const pl=pending[leg.token]||[];
+        while(need>1e-12 && pl.length){ const lot=pl[0]; const take=Math.min(lot.qty,need); addLot(ev.cid,ev.wallet,leg.token,take,lot.basisPerUnit,lot.date); lot.qty-=take; need-=take; if(lot.qty<=1e-12) pl.shift(); }
+        if(need>1e-12){ addLot(ev.cid,ev.wallet,leg.token,need,0,ev.ts); flags.push(`Transfer in of ${fmtQty(need)} ${leg.token} (${dateUTC(ev.ts)}) had no matching out — basis set to $0. Verify.`); }
+      }
+      eventResults[ev.id]={note:'transfer'}; continue;
+    }
+
+    if(opt.nontax){ // gift out etc — remove lots, no gain recognized (basis just leaves)
+      for(const leg of ev.outs) consume(ev.cid,ev.wallet,leg.token,leg.qty,ev.ts);
+      eventResults[ev.id]={note:'non-taxable out'}; continue;
+    }
+
+    if(opt.income){
+      for(const leg of ev.ins){
+        const p=getPrice(leg.token,leg.contract,ev.ts).usd;
+        if(p==null){ flags.push(`Missing price for income ${leg.token} on ${dateUTC(ev.ts)}.`); continue; }
+        const usd=leg.qty*p;
+        if(new Date(ev.ts*1000).getUTCFullYear()===S.taxYear) incomeRows.push({date:dateUTC(ev.ts),token:leg.token,qty:leg.qty,usd,wallet:ev.wallet,cid:ev.cid});
+        addLot(ev.cid,ev.wallet,leg.token,leg.qty,p,ev.ts); // basis = FMV when received
+      }
+      eventResults[ev.id]={note:'income'}; continue;
+    }
+
+    if(opt.acquire){ // buy
+      for(const leg of ev.ins){
+        const p=getPrice(leg.token,leg.contract,ev.ts).usd;
+        const basisPer = p!=null ? p + (gasUSD/Math.max(leg.qty,1e-9)/ev.ins.length) : 0;
+        addLot(ev.cid,ev.wallet,leg.token,leg.qty,basisPer,ev.ts);
+        if(p==null) flags.push(`Missing price for buy ${leg.token} on ${dateUTC(ev.ts)} — basis $0.`);
+      }
+      eventResults[ev.id]={note:'buy'}; continue;
+    }
+
+    // TAXABLE DISPOSALS: trade / sale / spend
+    if(opt.taxable){
+      let evGain=0, missing=false;
+      // proceeds = FMV of what left the wallet (disposed)
+      for(const leg of ev.outs){
+        const p=getPrice(leg.token,leg.contract,ev.ts).usd;
+        if(p==null){ missing=true; flags.push(`Missing price for disposed ${leg.token} on ${dateUTC(ev.ts)}.`); continue; }
+        let proceeds=leg.qty*p - (gasUSD/ev.outs.length); // gas reduces proceeds
+        const {used,short}=consume(ev.cid,ev.wallet,leg.token,leg.qty,ev.ts);
+        if(short>0) flags.push(`Disposed ${fmtQty(short)} ${leg.token} with no tracked basis (${dateUTC(ev.ts)}) — basis $0 used.`);
+        // split proceeds across consumed lots by qty for term classification
+        const totalQty=used.reduce((s,u)=>s+u.take,0)+short;
+        const perUnitProceeds = totalQty>0 ? proceeds/totalQty : 0;
+        const allUsed=[...used, ...(short>0?[{take:short,date:ev.ts,basisPerUnit:0}]:[])];
+        for(const u of allUsed){
+          const lotProceeds=u.take*perUnitProceeds, lotBasis=u.take*u.basisPerUnit;
+          const longTerm=(ev.ts-u.date)>SECONDS_LONG;
+          const gain=lotProceeds-lotBasis; evGain+=gain;
+          if(new Date(ev.ts*1000).getUTCFullYear()===S.taxYear){
+            f8949.push({ desc:`${fmtQty(u.take)} ${leg.token}`, acq:dateUTC(u.date), disp:dateUTC(ev.ts),
+              proceeds:lotProceeds, basis:lotBasis, gain, term:longTerm?'long':'short',
+              chain:CHAINS[ev.cid].name, wallet:ev.wallet, hash:ev.hash });
+          }
+        }
+      }
+      // the "in" side of a swap establishes new basis
+      if(type==='trade'){
+        for(const leg of ev.ins){
+          const p=getPrice(leg.token,leg.contract,ev.ts).usd;
+          addLot(ev.cid,ev.wallet,leg.token,leg.qty, p!=null?p:0, ev.ts);
+          if(p==null) flags.push(`Missing price for received ${leg.token} on ${dateUTC(ev.ts)} — new basis $0.`);
+        }
+      }
+      eventResults[ev.id]={gain:evGain,note:missing?'missing price':'',missing};
+      continue;
+    }
+
+    // review_* — not yet classified: skip from math but count
+    eventResults[ev.id]={note:'unreviewed',review:true};
+  }
+
+  return {events,f8949,incomeRows,flags,eventResults};
+}
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+let CURRENT=null;
+function recompute(){
+  if(!S.legs.length){ document.getElementById('tab-summary').innerHTML='<p class="hint">No data yet — add wallets and pull transactions.</p>'; return; }
+  CURRENT=computeTax();
+  document.getElementById('legCount').textContent=`${S.legs.length} legs · ${CURRENT.events.length} events`;
+  renderSummary(); renderReview(); renderEvents(); renderF8949(); renderIncome();
+}
+
+function totals(rows){
+  const t={shortP:0,shortB:0,longP:0,longB:0};
+  for(const r of rows){ if(r.term==='short'){t.shortP+=r.proceeds;t.shortB+=r.basis;} else {t.longP+=r.proceeds;t.longB+=r.basis;} }
+  t.shortG=t.shortP-t.shortB; t.longG=t.longP-t.longB; t.totalG=t.shortG+t.longG; return t;
+}
+function gainClass(n){ return n>0?'pos':(n<0?'neg':''); }
+
+function renderSummary(){
+  const t=totals(CURRENT.f8949);
+  const income=CURRENT.incomeRows.reduce((s,r)=>s+r.usd,0);
+  const reviewN=CURRENT.events.filter(e=>(TYPE_OPTIONS[e.type]||{}).review).length;
+  const missN=Object.values(CURRENT.eventResults).filter(r=>r.missing).length;
+  const el=document.getElementById('tab-summary');
+  el.innerHTML=`
+   <div class="infobox">Tax year <strong>${S.taxYear}</strong>. Cost basis is tracked separately per chain + wallet (FIFO), per the
+     IRS wallet-by-wallet rule effective 2025. Numbers below are a draft for Form 8949 / Schedule D.</div>
+   <div style="margin-bottom:8px">
+     <div class="stat"><div class="v ${gainClass(t.shortG)}">${fmtUSD(t.shortG)}</div><div class="l">Short-term gain/loss</div></div>
+     <div class="stat"><div class="v ${gainClass(t.longG)}">${fmtUSD(t.longG)}</div><div class="l">Long-term gain/loss</div></div>
+     <div class="stat"><div class="v ${gainClass(t.totalG)}">${fmtUSD(t.totalG)}</div><div class="l">Net capital gain/loss</div></div>
+     <div class="stat"><div class="v">${fmtUSD(income)}</div><div class="l">Ordinary income (yield)</div></div>
+   </div>
+   <table style="max-width:560px">
+     <tr><th>Schedule D</th><th class="num">Proceeds</th><th class="num">Cost basis</th><th class="num">Gain/loss</th></tr>
+     <tr><td>Short-term (≤1 yr)</td><td class="num">${fmtUSD(t.shortP)}</td><td class="num">${fmtUSD(t.shortB)}</td><td class="num ${gainClass(t.shortG)}">${fmtUSD(t.shortG)}</td></tr>
+     <tr><td>Long-term (&gt;1 yr)</td><td class="num">${fmtUSD(t.longP)}</td><td class="num">${fmtUSD(t.longB)}</td><td class="num ${gainClass(t.longG)}">${fmtUSD(t.longG)}</td></tr>
+     <tr style="font-weight:700"><td>Total</td><td class="num">${fmtUSD(t.shortP+t.longP)}</td><td class="num">${fmtUSD(t.shortB+t.longB)}</td><td class="num ${gainClass(t.totalG)}">${fmtUSD(t.totalG)}</td></tr>
+   </table>
+   ${(reviewN||missN)?`<div class="warnbox" style="margin-top:14px">
+      ${reviewN?`<strong>${reviewN}</strong> event(s) need classification (Review queue). `:''}
+      ${missN?`<strong>${missN}</strong> taxable event(s) are missing a price — run “Fetch missing prices” or set prices in the Events tab.`:''}
+      These are excluded from the totals above until resolved.</div>`:''}
+   ${CURRENT.flags.length?`<details style="margin-top:12px"><summary>${CURRENT.flags.length} data flags</summary>
+      <div class="log" style="background:#2a1a12;color:#f0c9b6">${escapeHtml([...new Set(CURRENT.flags)].join('\n'))}</div></details>`:''}
+  `;
+}
+
+function renderReview(){
+  const evs=CURRENT.events.filter(e=>(TYPE_OPTIONS[e.type]||{}).review);
+  const el=document.getElementById('tab-review');
+  if(!evs.length){ el.innerHTML='<p class="hint">Nothing to review. Every event is classified. 🎉</p>'; return; }
+  el.innerHTML=`<p class="hint">${evs.length} event(s) the auto-classifier wasn’t sure about — usually DeFi (Aave/GMX/LP), airdrops, or
+    one-sided transfers. Pick a treatment for each. Tip: depositing into a lending/LP position is often <em>not</em> a disposal; a
+    pure reward/airdrop is income; receiving a swapped token is a trade.</p>${eventsTable(evs)}`;
+}
+function renderEvents(){
+  document.getElementById('tab-events').innerHTML=
+    `<p class="hint">Every classified event. Change any treatment or set a missing price (USD per unit, that day).</p>${eventsTable(CURRENT.events)}`;
+}
+function eventsTable(evs){
+  let rows='';
+  for(const ev of evs){
+    const legsTxt=l=>l.map(x=>`${fmtQty(x.qty)} ${x.token}`).join(' + ')||'—';
+    const res=CURRENT.eventResults[ev.id]||{};
+    const opts=Object.entries(TYPE_OPTIONS).filter(([k])=>!k.startsWith('review')||k===ev.type)
+      .map(([k,o])=>`<option value="${k}" ${ev.type===k?'selected':''}>${o.label}</option>`).join('');
+    const pillType=ev.type.startsWith('review')?'review':(TYPE_OPTIONS[ev.type]?.taxable?'taxable':TYPE_OPTIONS[ev.type]?.income?'income':TYPE_OPTIONS[ev.type]?.transfer?'transfer':'ignore');
+    const wl=S.wallets.find(w=>lc(w.address)===ev.wallet);
+    // price inputs for legs missing price
+    let priceCells='';
+    for(const leg of [...ev.outs,...ev.ins]){
+      if(STABLES.has(leg.token)) continue;
+      const pr=getPrice(leg.token,leg.contract,ev.ts);
+      if(pr.usd==null){ const okey=priceKey(leg.token,leg.contract,ev.ts);
+        priceCells+=`<div style="margin-top:3px"><span class="flag">${leg.token} price?</span> <input class="priceInput" placeholder="$/unit" onchange="setManualPrice('${okey}',this.value)"></div>`; }
+    }
+    rows+=`<tr>
+      <td><span class="pill ${CHAINS[ev.cid].key}">${CHAINS[ev.cid].name}</span><div style="font-size:11px;color:var(--muted);margin-top:2px">${escapeHtml(wl?wl.label:shortA(ev.wallet))}</div></td>
+      <td>${dateUTC(ev.ts)}</td>
+      <td style="color:var(--rust)">${legsTxt(ev.outs)}</td>
+      <td style="color:var(--green)">${legsTxt(ev.ins)}</td>
+      <td><select class="miniSelect" onchange="setType('${ev.id}',this.value)">${opts}</select>${priceCells}</td>
+      <td class="num ${gainClass(res.gain||0)}">${res.gain!=null?fmtUSD(res.gain):''}</td>
+      <td><a class="hash" href="${ev.cid===1?'https://etherscan.io/tx/':'https://arbiscan.io/tx/'}${ev.hash}" target="_blank">${ev.hash.slice(0,10)}…</a></td>
+    </tr>`;
+  }
+  return `<div class="scrolly"><table>
+    <tr><th>Chain / wallet</th><th>Date</th><th>Out (disposed)</th><th>In (received)</th><th>Treatment</th><th class="num">Gain</th><th>Tx</th></tr>
+    ${rows}</table></div>`;
+}
+function setType(id,val){ S.cls[id]=val; save(); recompute(); }
+function setManualPrice(okey,val){ const n=parseFloat(val); if(!isNaN(n)) S.priceOverride[okey]=n; save(); recompute(); }
+
+function renderF8949(){
+  const rows=CURRENT.f8949.slice().sort((a,b)=> a.term===b.term ? (a.disp<b.disp?-1:1) : (a.term==='short'?-1:1));
+  const t=totals(CURRENT.f8949);
+  let body='';
+  for(const r of rows){
+    body+=`<tr>
+      <td>${r.desc}</td><td>${r.acq}</td><td>${r.disp}</td>
+      <td class="num">${fmtUSD(r.proceeds)}</td><td class="num">${fmtUSD(r.basis)}</td>
+      <td class="num ${gainClass(r.gain)}">${fmtUSD(r.gain)}</td>
+      <td><span class="pill ${r.term==='long'?'transfer':'taxable'}">${r.term}</span></td>
+      <td><span class="pill ${r.chain==='Ethereum'?'eth':'arb'}">${r.chain}</span></td>
+    </tr>`;
+  }
+  document.getElementById('tab-f8949').innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+      <p class="hint" style="margin:0">${rows.length} disposal line(s) for ${S.taxYear}. Each row = one lot consumed (FIFO).
+        Short-term → Form 8949 Part I; long-term → Part II.</p>
+      <button class="sky" onclick="exportCSV()" ${rows.length?'':'disabled'}>Download 8949 CSV</button>
+    </div>
+    <div class="scrolly" style="margin-top:10px"><table>
+      <tr><th>Description</th><th>Acquired</th><th>Disposed</th><th class="num">Proceeds</th><th class="num">Cost basis</th><th class="num">Gain/loss</th><th>Term</th><th>Chain</th></tr>
+      ${body||'<tr><td colspan="8" class="hint" style="padding:18px">No disposals in this tax year.</td></tr>'}
+    </table></div>
+    <table style="max-width:560px;margin-top:14px">
+      <tr><th>Totals</th><th class="num">Proceeds</th><th class="num">Basis</th><th class="num">Gain/loss</th></tr>
+      <tr><td>Short-term</td><td class="num">${fmtUSD(t.shortP)}</td><td class="num">${fmtUSD(t.shortB)}</td><td class="num ${gainClass(t.shortG)}">${fmtUSD(t.shortG)}</td></tr>
+      <tr><td>Long-term</td><td class="num">${fmtUSD(t.longP)}</td><td class="num">${fmtUSD(t.longB)}</td><td class="num ${gainClass(t.longG)}">${fmtUSD(t.longG)}</td></tr>
+    </table>`;
+}
+function renderIncome(){
+  const rows=CURRENT.incomeRows.slice().sort((a,b)=>a.date<b.date?-1:1);
+  const total=rows.reduce((s,r)=>s+r.usd,0);
+  let body=rows.map(r=>{const wl=S.wallets.find(w=>lc(w.address)===r.wallet);
+    return `<tr><td>${r.date}</td><td><span class="pill ${CHAINS[r.cid].key}">${CHAINS[r.cid].name}</span></td>
+      <td>${escapeHtml(wl?wl.label:shortA(r.wallet))}</td><td class="num">${fmtQty(r.qty)} ${r.token}</td>
+      <td class="num">${fmtUSD(r.usd)}</td></tr>`;}).join('');
+  document.getElementById('tab-income').innerHTML=`
+    <p class="hint">Tokens you classified as income (yield, staking, airdrops) — ordinary income at fair value when received, for ${S.taxYear}.
+      Their basis carries forward so you’re not taxed again on disposal.</p>
+    <div class="scrolly"><table>
+      <tr><th>Date</th><th>Chain</th><th>Wallet</th><th class="num">Amount</th><th class="num">USD value</th></tr>
+      ${body||'<tr><td colspan="5" class="hint" style="padding:18px">No income events classified for this year.</td></tr>'}
+      ${rows.length?`<tr style="font-weight:700"><td colspan="4">Total ordinary income</td><td class="num">${fmtUSD(total)}</td></tr>`:''}
+    </table></div>`;
+}
+
+/* ---------- tabs ---------- */
+function showTab(name,btn){
+  if(!name) return;
+  ['summary','review','events','f8949','income'].forEach(t=>document.getElementById('tab-'+t).classList.add('hidden'));
+  document.getElementById('tab-'+name).classList.remove('hidden');
+  document.querySelectorAll('#tabbar button').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+}
+
+/* ---------- export ---------- */
+function exportCSV(){
+  const rows=CURRENT.f8949.slice().sort((a,b)=> a.term===b.term?0:(a.term==='short'?-1:1));
+  let csv='Description,Date acquired,Date sold,Proceeds,Cost basis,Gain/loss,Term,Chain,Wallet,Tx hash\n';
+  for(const r of rows){
+    const wl=S.wallets.find(w=>lc(w.address)===r.wallet);
+    csv+=[`"${r.desc}"`,r.acq,r.disp,r.proceeds.toFixed(2),r.basis.toFixed(2),r.gain.toFixed(2),r.term,r.chain,`"${wl?wl.label:r.wallet}"`,r.hash].join(',')+'\n';
+  }
+  downloadFile(`form8949_${S.taxYear}.csv`,csv,'text/csv');
+}
+function exportState(){ downloadFile('crypto-tax-backup.json',JSON.stringify(S),'application/json'); }
+function importState(e){ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ try{ S=Object.assign(blankState(),JSON.parse(r.result)); save(); location.reload(); }catch(err){alert('Bad file.');} }; r.readAsText(f); }
+function downloadFile(name,content,type){ const b=new Blob([content],{type}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=name; a.click(); }
+function resetAll(){ if(confirm('Delete all cached data, wallets, classifications and prices from this browser?')){ localStorage.removeItem('cryptotax'); location.reload(); } }
+
+/* ---------- boot ---------- */
+initYears(); hydrateKeys(); renderWallets(); recompute();
+if(S.legs.length) document.getElementById('legCount').textContent=`${S.legs.length} legs cached.`;
+</script>
+</body>
+</html>
