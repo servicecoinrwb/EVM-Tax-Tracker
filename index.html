@@ -43,6 +43,10 @@
   .pill{display:inline-block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:2px 7px;border-radius:4px}
   .pill.eth{background:#e7edf6;color:#34507e}
   .pill.arb{background:#e3eef5;color:#1f6f96}
+  .pill.op{background:#fbe4e4;color:#b53d3d}
+  .pill.base{background:#e2e9fb;color:#2a4bd0}
+  .pill.bnb{background:#fbf2d8;color:#8a6d1d}
+  .pill.pol{background:#efe7f9;color:#6a3b9f}
   .pill.taxable{background:var(--rust-bg);color:var(--rust)}
   .pill.income{background:#efe7f6;color:#6a3b8f}
   .pill.transfer{background:var(--green-bg);color:var(--green)}
@@ -134,8 +138,8 @@
   <!-- STEP 3: PULL -->
   <div class="card">
     <h2><span class="step">3</span>Pull on-chain history</h2>
-    <p class="hint">Fetches full history (all years) so cost basis is correct, across Ethereum + Arbitrum. Heavy DeFi wallets can take a
-      minute. Re-running merges with what's cached.</p>
+    <p class="hint">Fetches full history (all years) so cost basis is correct, across Ethereum, Arbitrum, Optimism, Base, BNB Chain and Polygon.
+      Many wallets across six chains can take several minutes on a free key. Re-running merges with what's cached.</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <button id="pullBtn" onclick="pullAll()">Pull transactions</button>
       <button class="ghost" onclick="fetchPrices()">Fetch missing prices</button>
@@ -172,21 +176,26 @@
    ============================================================ */
 
 const CHAINS = {
-  1:     {key:'eth', name:'Ethereum',  cgPlatform:'ethereum'},
-  42161: {key:'arb', name:'Arbitrum',  cgPlatform:'arbitrum-one'},
+  1:     {key:'eth',  name:'Ethereum',  cgPlatform:'ethereum',            native:{sym:'ETH',cgId:'ethereum'},     explorer:'etherscan.io'},
+  42161: {key:'arb',  name:'Arbitrum',  cgPlatform:'arbitrum-one',        native:{sym:'ETH',cgId:'ethereum'},     explorer:'arbiscan.io'},
+  10:    {key:'op',   name:'Optimism',  cgPlatform:'optimistic-ethereum', native:{sym:'ETH',cgId:'ethereum'},     explorer:'optimistic.etherscan.io'},
+  8453:  {key:'base', name:'Base',      cgPlatform:'base',                native:{sym:'ETH',cgId:'ethereum'},     explorer:'basescan.org'},
+  56:    {key:'bnb',  name:'BNB Chain', cgPlatform:'binance-smart-chain', native:{sym:'BNB',cgId:'binancecoin'},  explorer:'bscscan.com'},
+  137:   {key:'pol',  name:'Polygon',   cgPlatform:'polygon-pos',         native:{sym:'POL',cgId:'matic-network'},explorer:'polygonscan.com'},
 };
 const SECONDS_LONG = 365*24*60*60; // long-term threshold (>1 year)
 const ETHERSCAN_BASE = 'https://api.etherscan.io/v2/api';
 const CG_BASE = 'https://api.coingecko.com/api/v3';
+function txUrl(cid,hash){ return 'https://'+((CHAINS[cid]&&CHAINS[cid].explorer)||'etherscan.io')+'/tx/'+hash; }
 
 // token symbol -> coingecko id (best-effort; contract lookup is the fallback)
 const CG_IDS = {
   ETH:'ethereum', WETH:'weth', WBTC:'wrapped-bitcoin', ARB:'arbitrum',
   GMX:'gmx', LINK:'chainlink', UNI:'uniswap', AAVE:'aave', CRV:'curve-dao-token',
-  LDO:'lido-dao', PEPE:'pepe', MATIC:'matic-network'
+  LDO:'lido-dao', PEPE:'pepe', MATIC:'matic-network', POL:'matic-network', BNB:'binancecoin'
 };
 // treat as $1.00 (skip API)
-const STABLES = new Set(['USDC','USDC.E','USDT','DAI','USDS','TUSD','FRAX','USDE','GUSD','LUSD','USDD','PYUSD']);
+const STABLES = new Set(['USDC','USDC.E','USDT','USD₮0','USDT0','DAI','USDS','TUSD','FRAX','USDE','USD0','GUSD','LUSD','USDD','PYUSD','BUSD','USDX','GHO']);
 
 let S = blankState(); // populated on boot
 
@@ -326,7 +335,7 @@ async function pullAll(){
   for(const w of S.wallets) for(const cid of Object.keys(CHAINS)) tasks.push([w,+cid]);
   let done=0;
   for(const [w,cid] of tasks){
-    const cname=CHAINS[cid].name;
+    const cname=CHAINS[cid].name; const nsym=CHAINS[cid].native.sym;
     try{
       log(`Pulling ${w.label} on ${cname}…`);
       const [tok, nat, intl] = [
@@ -342,24 +351,24 @@ async function pullAll(){
         legs.push(mkLeg(cid,w.address,t.hash,+t.timeStamp,t.tokenSymbol||'?',lc(t.contractAddress),
                         (+t.value)/Math.pow(10,dec), dir, lc(t.from), lc(t.to)));
       }
-      // native ETH value transfers
+      // native value transfers (ETH / BNB / POL per chain)
       for(const t of nat){
         const v=(+t.value)/1e18;
         if(v>0){
-          if(lc(t.to)===lc(w.address)) legs.push(mkLeg(cid,w.address,t.hash,+t.timeStamp,'ETH','native',v,'in',lc(t.from),lc(t.to)));
-          if(lc(t.from)===lc(w.address)) legs.push(mkLeg(cid,w.address,t.hash,+t.timeStamp,'ETH','native',v,'out',lc(t.from),lc(t.to)));
+          if(lc(t.to)===lc(w.address)) legs.push(mkLeg(cid,w.address,t.hash,+t.timeStamp,nsym,'native',v,'in',lc(t.from),lc(t.to)));
+          if(lc(t.from)===lc(w.address)) legs.push(mkLeg(cid,w.address,t.hash,+t.timeStamp,nsym,'native',v,'out',lc(t.from),lc(t.to)));
         }
         // gas: only when this wallet was the sender (from==wallet) and tx not failed
         if(lc(t.from)===lc(w.address) && t.isError!=='1'){
           const gas=((+t.gasUsed)*(+t.gasPrice))/1e18;
-          legs.push({ id:legId(cid,w.address,t.hash,'ETH','native','gas',gas), chain:cid, wallet:lc(w.address), hash:t.hash, ts:+t.timeStamp, token:'ETH', contract:'native', qty:gas, dir:'gas', from:lc(t.from), to:lc(t.to) });
+          legs.push({ id:legId(cid,w.address,t.hash,nsym,'native','gas',gas), chain:cid, wallet:lc(w.address), hash:t.hash, ts:+t.timeStamp, token:nsym, contract:'native', qty:gas, dir:'gas', from:lc(t.from), to:lc(t.to) });
         }
       }
-      // internal ETH (contract-sent)
+      // internal native (contract-sent)
       for(const t of intl){
         const v=(+t.value)/1e18; if(v<=0||t.isError==='1') continue;
-        if(lc(t.to)===lc(w.address)) legs.push(mkLeg(cid,w.address,t.hash,+t.timeStamp,'ETH','native',v,'in',lc(t.from),lc(t.to)));
-        if(lc(t.from)===lc(w.address)) legs.push(mkLeg(cid,w.address,t.hash,+t.timeStamp,'ETH','native',v,'out',lc(t.from),lc(t.to)));
+        if(lc(t.to)===lc(w.address)) legs.push(mkLeg(cid,w.address,t.hash,+t.timeStamp,nsym,'native',v,'in',lc(t.from),lc(t.to)));
+        if(lc(t.from)===lc(w.address)) legs.push(mkLeg(cid,w.address,t.hash,+t.timeStamp,nsym,'native',v,'out',lc(t.from),lc(t.to)));
       }
     }catch(e){ log('  ! '+cname+': '+e.message); }
     done++; setProgress(done/tasks.length);
@@ -380,7 +389,13 @@ function legId(cid,wallet,hash,token,contract,dir,qty){
   const n=(_legSeq[base]=(_legSeq[base]||0)+1);
   return base+'#'+n;
 }
-function normToken(token,contract){ const t=(token||'?').toUpperCase(); if(t==='WETH') return {token:'ETH',contract:'native'}; return {token:t,contract}; }
+function normToken(token,contract){
+  const t=(token||'?').toUpperCase();
+  if(t==='WETH') return {token:'ETH',contract:'native'};
+  if(t==='WBNB') return {token:'BNB',contract:'native'};
+  if(t==='WMATIC'||t==='WPOL') return {token:'POL',contract:'native'};
+  return {token:t,contract};
+}
 function mkLeg(cid,wallet,hash,ts,token,contract,qty,dir,from,to){
   const n=normToken(token,contract);
   return { id:legId(cid,wallet,hash,n.token,n.contract,dir,qty), chain:cid, wallet:lc(wallet), hash, ts, token:n.token, contract:n.contract, qty, dir, from, to };
@@ -476,7 +491,7 @@ async function fetchPrices(){
       if(getPrice(leg.token,leg.contract,ev.ts).usd!=null) continue;
       need.set(okey,{token:leg.token,contract:leg.contract,ts:ev.ts,cid:ev.cid});
     }
-    if(ev.gasEth>0 && (o.taxable||o.income||o.acquire)){ const okey=priceKey('ETH','native',ev.ts); if(getPrice('ETH','native',ev.ts).usd==null) need.set(okey,{token:'ETH',contract:'native',ts:ev.ts,cid:ev.cid}); }
+    if(ev.gasEth>0 && (o.taxable||o.income||o.acquire)){ const ns=CHAINS[ev.cid].native.sym; const okey=priceKey(ns,'native',ev.ts); if(getPrice(ns,'native',ev.ts).usd==null) need.set(okey,{token:ns,contract:'native',ts:ev.ts,cid:ev.cid}); }
   }
   const items=[...need.entries()];
   if(!items.length){ log('No missing prices.'); return; }
@@ -540,7 +555,8 @@ function computeTax(){
     const type=ev.type;
     const opt=TYPE_OPTIONS[type]||{};
     // allocate gas (USD) to add to basis (acquisitions) or proceeds-reduction (disposals)
-    const gp=getPrice('ETH','native',ev.ts).usd; const gasUSD = ev.gasEth>0 && gp!=null ? ev.gasEth*gp : 0;
+    const nsym=CHAINS[ev.cid].native.sym;
+    const gp=getPrice(nsym,'native',ev.ts).usd; const gasUSD = ev.gasEth>0 && gp!=null ? ev.gasEth*gp : 0;
 
     if(opt.ignore){ eventResults[ev.id]={note:'ignored'}; continue; }
 
@@ -710,7 +726,7 @@ function renderReview(){
   const cpRows=cpList.slice(0,120).map((g,i)=>{
     const toks=Object.keys(g.tokens).slice(0,5).map(escapeHtml).join(', ');
     const isUnknown=g.c.startsWith('(');
-    const link=isUnknown?g.c:`<a class="hash" href="https://arbiscan.io/address/${g.c}" target="_blank">${shortA(g.c)} ↗arb</a> <a class="hash" href="https://etherscan.io/address/${g.c}" target="_blank">↗eth</a>`;
+    const link=isUnknown?g.c:`<a class="hash" href="https://blockscan.com/address/${g.c}" target="_blank">${shortA(g.c)} ↗</a>`;
     return `<tr><td>${link}<br><input class="cpNote" placeholder="label (GMX, Aave…)" value="${escapeHtml(S.cpLabels[g.c]||'')}" onchange="setCpLabel(${i},this.value)" style="margin-top:4px;width:150px;font-size:11px;padding:3px 5px"></td>
       <td class="num">${g.count}</td><td>${hintPill(g.hint)}</td><td style="font-size:11px;color:var(--muted)">${toks}</td>
       <td>${bulkSel('cpsel_'+i,g.suggest)} <button class="sky" style="padding:5px 10px" onclick="applyCp(${i})">Apply</button></td></tr>`;
@@ -776,7 +792,7 @@ function eventsTable(evs, cap){
       <td style="color:var(--green)">${legsTxt(ev.ins)}</td>
       <td><select class="miniSelect" onchange="setType('${ev.id}',this.value)">${opts}</select>${priceCells}</td>
       <td class="num ${gainClass(res.gain||0)}">${res.gain!=null?fmtUSD(res.gain):''}</td>
-      <td><a class="hash" href="${ev.cid===1?'https://etherscan.io/tx/':'https://arbiscan.io/tx/'}${ev.hash}" target="_blank">${ev.hash.slice(0,10)}…</a></td>
+      <td><a class="hash" href="${txUrl(ev.cid,ev.hash)}" target="_blank">${ev.hash.slice(0,10)}…</a></td>
     </tr>`;
   }
   return `<div class="scrolly"><table>
