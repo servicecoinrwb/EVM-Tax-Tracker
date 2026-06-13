@@ -396,6 +396,16 @@ function normToken(token,contract){
   if(t==='WMATIC'||t==='WPOL') return {token:'POL',contract:'native'};
   return {token:t,contract};
 }
+// Detect scam-airdrop / address-poisoning tokens: URLs & claim-bait in the symbol,
+// or invisible/directional Unicode and homoglyph scripts used to fake real tickers (e.g. fake "USDC").
+function isSpam(sym){
+  if(!sym) return false;
+  if(STABLES.has(sym.toUpperCase())) return false; // legit stables (incl. USD₮0) never spam
+  if(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF\u0400-\u04FF\uA4D0-\uA4FF]/.test(sym)) return true; // invisible / Cyrillic / Lisu homoglyphs
+  const s=sym.toUpperCase();
+  if(/HTTPS?:|WWW\.|:\/\/|\.(VIP|XYZ|PRO|ORG|GG|TOP|APP|LIVE|CC|IO|COM|NET|CO|US|FUN|CLICK|SITE|ONLINE|INFO|ME)\b|CLAIM|REWARD|VOUCHER|AIRDROP|T\.ME|\bBONUS\b/.test(s)) return true;
+  return false;
+}
 function mkLeg(cid,wallet,hash,ts,token,contract,qty,dir,from,to){
   const n=normToken(token,contract);
   return { id:legId(cid,wallet,hash,n.token,n.contract,dir,qty), chain:cid, wallet:lc(wallet), hash, ts, token:n.token, contract:n.contract, qty, dir, from, to };
@@ -438,9 +448,12 @@ function buildEvents(){
     if(!outs.length && !ins.length) continue; // pure wrap/cancel — nothing taxable
     const allCounterMine = counters.size===0;
     const counter=[...counters][0]||'';
+    const allToks=[...outs,...ins].map(x=>x.token);
+    const spamOnly = allToks.length>0 && allToks.every(isSpam);
 
     let auto;
-    if(outs.length && ins.length) auto='trade';
+    if(spamOnly) auto='ignore';                              // address-poisoning / scam-airdrop dust
+    else if(outs.length && ins.length) auto='trade';
     else if(outs.length && !ins.length) auto = allCounterMine ? 'transfer' : 'review_out';
     else auto = allCounterMine ? 'transfer' : 'review_in';
 
