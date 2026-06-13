@@ -190,9 +190,9 @@ let S = blankState(); // populated on boot
    Bulk/regenerable data (legs + price cache) -> IndexedDB (no 5MB cap). */
 function blankState(){
   return { keys:{etherscan:'',cg:''}, taxYear:new Date().getFullYear()-1,
-           wallets:[], legs:[], cls:{}, prices:{}, priceOverride:{} };
+           wallets:[], legs:[], cls:{}, prices:{}, priceOverride:{}, cpLabels:{} };
 }
-const META_KEYS=['keys','taxYear','wallets','cls','priceOverride'];
+const META_KEYS=['keys','taxYear','wallets','cls','priceOverride','cpLabels'];
 function loadMeta(){
   try{ const m=JSON.parse(localStorage.getItem('cryptotax_meta')||'null');
     if(m) META_KEYS.forEach(k=>{ if(m[k]!==undefined) S[k]=m[k]; }); }catch(e){}
@@ -367,9 +367,10 @@ function legId(cid,wallet,hash,token,contract,dir,qty){
   const n=(_legSeq[base]=(_legSeq[base]||0)+1);
   return base+'#'+n;
 }
+function normToken(token,contract){ const t=(token||'?').toUpperCase(); if(t==='WETH') return {token:'ETH',contract:'native'}; return {token:t,contract}; }
 function mkLeg(cid,wallet,hash,ts,token,contract,qty,dir,from,to){
-  token=token.toUpperCase();
-  return { id:legId(cid,wallet,hash,token,contract,dir,qty), chain:cid, wallet:lc(wallet), hash, ts, token, contract, qty, dir, from, to };
+  const n=normToken(token,contract);
+  return { id:legId(cid,wallet,hash,n.token,n.contract,dir,qty), chain:cid, wallet:lc(wallet), hash, ts, token:n.token, contract:n.contract, qty, dir, from, to };
 }
 
 /* ============================================================
@@ -391,27 +392,32 @@ function buildEvents(){
   const events=[];
   for(const k of Object.keys(groups)){
     const ls=groups[k]; const [wallet,hash]=k.split('|'); const cid=ls[0].chain; const ts=Math.min(...ls.map(x=>x.ts));
-    // net per token+dir
-    const net={};
-    for(const l of ls){ const kk=l.token+'|'+l.contract+'|'+l.dir; net[kk]=net[kk]||{token:l.token,contract:l.contract,dir:l.dir,qty:0,from:l.from,to:l.to}; net[kk].qty+=l.qty; }
-    const outs=Object.values(net).filter(x=>x.dir==='out'&&x.qty>1e-12);
-    const ins =Object.values(net).filter(x=>x.dir==='in' &&x.qty>1e-12);
+    // net per token = (in − out). Cancels WETH wrap/unwrap and change/refund outputs.
+    const tok={};
+    for(const l of ls){
+      const n=normToken(l.token,l.contract);
+      const tk=n.token+'|'+n.contract;
+      tok[tk]=tok[tk]||{token:n.token,contract:n.contract,net:0,inFrom:new Set(),outTo:new Set()};
+      if(l.dir==='in'){ tok[tk].net+=l.qty; if(!mine.has(l.from)) tok[tk].inFrom.add(l.from); }
+      else if(l.dir==='out'){ tok[tk].net-=l.qty; if(!mine.has(l.to)) tok[tk].outTo.add(l.to); }
+    }
+    const outs=[], ins=[]; const counters=new Set();
+    for(const t of Object.values(tok)){
+      if(t.net>1e-9){ ins.push({token:t.token,contract:t.contract,qty:t.net}); t.inFrom.forEach(a=>counters.add(a)); }
+      else if(t.net<-1e-9){ outs.push({token:t.token,contract:t.contract,qty:-t.net}); t.outTo.forEach(a=>counters.add(a)); }
+    }
     const gasEth=gasMap[k]||0;
-
-    // counterparties
-    const counter = [...outs,...ins].map(x=> x.dir==='out'?x.to:x.from).find(a=>a&&!mine.has(a));
-    const allCounterMine = [...outs,...ins].every(x=> mine.has(x.dir==='out'?x.to:x.from));
+    if(!outs.length && !ins.length) continue; // pure wrap/cancel — nothing taxable
+    const allCounterMine = counters.size===0;
+    const counter=[...counters][0]||'';
 
     let auto;
-    if(outs.length && ins.length) auto='trade';              // swap: taxable both sides
+    if(outs.length && ins.length) auto='trade';
     else if(outs.length && !ins.length) auto = allCounterMine ? 'transfer' : 'review_out';
-    else if(ins.length && !outs.length) auto = allCounterMine ? 'transfer' : 'review_in';
-    else continue;
+    else auto = allCounterMine ? 'transfer' : 'review_in';
 
     const id=k;
-    const ev={ id, cid, wallet, hash, ts, outs, ins, gasEth,
-               auto, type: S.cls[id] || auto, counter:counter||'' };
-    events.push(ev);
+    events.push({ id, cid, wallet, hash, ts, outs, ins, gasEth, auto, type:S.cls[id]||auto, counter });
   }
   events.sort((a,b)=>a.ts-b.ts);
   return events;
@@ -443,16 +449,21 @@ function getPrice(token,contract,ts){
   return {usd:null,src:null};
 }
 async function fetchPrices(){
-  // collect unique (token,contract,date) that lack a price and are needed (taxable legs in any year — basis needs all)
+  // only fetch prices the current classification actually needs — skip review/ignore/transfer/spam
   const events=buildEvents(); const need=new Map();
   for(const ev of events){
-    for(const leg of [...ev.outs,...ev.ins]){
+    const o=TYPE_OPTIONS[ev.type]||{};
+    let legsNeeded=[];
+    if(o.taxable) legsNeeded=ev.type==='trade'?[...ev.outs,...ev.ins]:ev.outs; // disposals (trade also prices received side)
+    else if(o.income||o.acquire) legsNeeded=ev.ins;
+    else continue; // review, ignore, transfer, gift → no price needed
+    for(const leg of legsNeeded){
       if(STABLES.has(leg.token)) continue;
       const okey=priceKey(leg.token,leg.contract,ev.ts);
       if(getPrice(leg.token,leg.contract,ev.ts).usd!=null) continue;
       need.set(okey,{token:leg.token,contract:leg.contract,ts:ev.ts,cid:ev.cid});
     }
-    if(ev.gasEth>0){ const okey=priceKey('ETH','native',ev.ts); if(getPrice('ETH','native',ev.ts).usd==null) need.set(okey,{token:'ETH',contract:'native',ts:ev.ts,cid:ev.cid}); }
+    if(ev.gasEth>0 && (o.taxable||o.income||o.acquire)){ const okey=priceKey('ETH','native',ev.ts); if(getPrice('ETH','native',ev.ts).usd==null) need.set(okey,{token:'ETH',contract:'native',ts:ev.ts,cid:ev.cid}); }
   }
   const items=[...need.entries()];
   if(!items.length){ log('No missing prices.'); return; }
@@ -653,38 +664,89 @@ function renderSummary(){
   `;
 }
 
+let RV=null;
 function renderReview(){
   const evs=CURRENT.events.filter(e=>(TYPE_OPTIONS[e.type]||{}).review);
   const el=document.getElementById('tab-review');
-  if(!evs.length){ el.innerHTML='<p class="hint">Nothing to review. Every event is classified. 🎉</p>'; return; }
-  el.innerHTML=`<p class="hint">${evs.length} event(s) the auto-classifier wasn’t sure about — usually DeFi (Aave/GMX/LP), airdrops, or
-    one-sided transfers. Pick a treatment for each. Tip: depositing into a lending/LP position is often <em>not</em> a disposal; a
-    pure reward/airdrop is income; receiving a swapped token is a trade.</p>${eventsTable(evs)}`;
+  if(!evs.length){ el.innerHTML='<p class="hint">Nothing to review — every event is classified. 🎉</p>'; RV=null; return; }
+
+  const byCp={};
+  for(const ev of evs){ const c=ev.counter||'(internal/unknown)'; const g=byCp[c]=byCp[c]||{c,count:0,tokens:{}}; g.count++; for(const lg of [...ev.outs,...ev.ins]) g.tokens[lg.token]=(g.tokens[lg.token]||0)+1; }
+  const cpList=Object.values(byCp).sort((a,b)=>b.count-a.count);
+
+  const byTok={};
+  for(const ev of evs){ const seen=new Set(); for(const lg of [...ev.outs,...ev.ins]){ const t=lg.token; const g=byTok[t]=byTok[t]||{t,count:0,inOnly:true}; if(!seen.has(t)){g.count++;seen.add(t);} if(ev.outs.length) g.inOnly=false; } }
+  const tokList=Object.values(byTok).sort((a,b)=>b.count-a.count);
+
+  RV={cpList,tokList,evs};
+  const bulkSel=id=>`<select class="miniSelect" id="${id}"><option value="">— set all to —</option>`+
+    Object.entries(TYPE_OPTIONS).filter(([k])=>!k.startsWith('review')).map(([k,o])=>`<option value="${k}">${o.label}</option>`).join('')+`</select>`;
+
+  const cpRows=cpList.slice(0,120).map((g,i)=>{
+    const toks=Object.keys(g.tokens).slice(0,5).map(escapeHtml).join(', ');
+    const isUnknown=g.c.startsWith('(');
+    const link=isUnknown?g.c:`<a class="hash" href="https://arbiscan.io/address/${g.c}" target="_blank">${shortA(g.c)} ↗arb</a> <a class="hash" href="https://etherscan.io/address/${g.c}" target="_blank">↗eth</a>`;
+    return `<tr><td>${link}<br><input class="cpNote" placeholder="label (GMX, Aave…)" value="${escapeHtml(S.cpLabels[g.c]||'')}" onchange="setCpLabel(${i},this.value)" style="margin-top:4px;width:150px;font-size:11px;padding:3px 5px"></td>
+      <td class="num">${g.count}</td><td style="font-size:11px;color:var(--muted)">${toks}</td>
+      <td>${bulkSel('cpsel_'+i)} <button class="sky" style="padding:5px 10px" onclick="applyCp(${i})">Apply</button></td></tr>`;
+  }).join('');
+
+  const tokRows=tokList.slice(0,120).map((g,i)=>`<tr>
+      <td><strong>${escapeHtml(g.t)}</strong> ${g.inOnly?'<span class="pill review">incoming only</span>':''}</td>
+      <td class="num">${g.count}</td>
+      <td>${bulkSel('toksel_'+i)} <button class="sky" style="padding:5px 10px" onclick="applyTok(${i})">Apply</button></td></tr>`).join('');
+
+  el.innerHTML=`
+   <div class="infobox">${evs.length} events need a call — <strong>classify groups, not rows.</strong>
+     “Incoming only” tokens you never sent are almost always spam airdrops → <em>Ignore</em>.
+     A repeated counterparty is usually one protocol: label it once, then set all
+     (LP / lending deposits → <em>Transfer</em>; reward claims → <em>Income</em>; a coin you bought off-chain → <em>Bought</em>).</div>
+   <details open><summary>By counterparty — ${cpList.length} addresses</summary>
+     <div class="scrolly" style="margin-top:8px"><table>
+       <tr><th>Counterparty</th><th class="num">Events</th><th>Tokens</th><th>Set all</th></tr>${cpRows}</table></div></details>
+   <details style="margin-top:14px"><summary>By token — ${tokList.length} tokens</summary>
+     <div class="scrolly" style="margin-top:8px"><table>
+       <tr><th>Token</th><th class="num">Events</th><th>Set all</th></tr>${tokRows}</table></div></details>
+   <details style="margin-top:14px"><summary>Line-by-line (first 300 of ${evs.length})</summary>${eventsTable(evs.slice(0,300))}</details>`;
 }
+function applyCp(i){ if(!RV)return; const c=RV.cpList[i].c; const v=document.getElementById('cpsel_'+i).value; if(!v)return;
+  for(const ev of CURRENT.events){ if((TYPE_OPTIONS[ev.type]||{}).review && (ev.counter||'(internal/unknown)')===c) S.cls[ev.id]=v; } save(); recompute(); }
+function applyTok(i){ if(!RV)return; const t=RV.tokList[i].t; const v=document.getElementById('toksel_'+i).value; if(!v)return;
+  for(const ev of CURRENT.events){ if((TYPE_OPTIONS[ev.type]||{}).review && [...ev.outs,...ev.ins].some(l=>l.token===t)) S.cls[ev.id]=v; } save(); recompute(); }
+function setCpLabel(i,v){ if(!RV)return; const c=RV.cpList[i].c; if(v) S.cpLabels[c]=v; else delete S.cpLabels[c]; save(); }
+
 function renderEvents(){
+  const q=(window._evq||'').toLowerCase().trim();
+  let evs=CURRENT.events;
+  if(q) evs=evs.filter(ev=> ev.type.includes(q) || ev.hash.toLowerCase().includes(q) || (ev.counter||'').includes(q) ||
+    [...ev.outs,...ev.ins].some(l=>l.token.toLowerCase().includes(q)) || (S.cpLabels[ev.counter]||'').toLowerCase().includes(q));
   document.getElementById('tab-events').innerHTML=
-    `<p class="hint">Every classified event. Change any treatment or set a missing price (USD per unit, that day).</p>${eventsTable(CURRENT.events)}`;
+    `<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+       <input id="evFilter" placeholder="filter by token, address, hash, treatment…" value="${escapeHtml(window._evq||'')}"
+         style="max-width:320px" oninput="window._evq=this.value;clearTimeout(window._evt);window._evt=setTimeout(renderEvents,300)">
+       <span class="hint" style="margin:0">${evs.length} of ${CURRENT.events.length} events</span></div>${eventsTable(evs,500)}`;
+  const f=document.getElementById('evFilter'); if(f && q){ f.focus(); f.setSelectionRange(f.value.length,f.value.length); }
 }
-function eventsTable(evs){
+function eventsTable(evs, cap){
+  const shown = cap? evs.slice(0,cap): evs;
   let rows='';
-  for(const ev of evs){
-    const legsTxt=l=>l.map(x=>`${fmtQty(x.qty)} ${x.token}`).join(' + ')||'—';
+  for(const ev of shown){
+    const legsTxt=l=>l.map(x=>`${fmtQty(x.qty)} ${escapeHtml(x.token)}`).join(' + ')||'—';
     const res=CURRENT.eventResults[ev.id]||{};
     const opts=Object.entries(TYPE_OPTIONS).filter(([k])=>!k.startsWith('review')||k===ev.type)
       .map(([k,o])=>`<option value="${k}" ${ev.type===k?'selected':''}>${o.label}</option>`).join('');
-    const pillType=ev.type.startsWith('review')?'review':(TYPE_OPTIONS[ev.type]?.taxable?'taxable':TYPE_OPTIONS[ev.type]?.income?'income':TYPE_OPTIONS[ev.type]?.transfer?'transfer':'ignore');
     const wl=S.wallets.find(w=>lc(w.address)===ev.wallet);
-    // price inputs for legs missing price
     let priceCells='';
     for(const leg of [...ev.outs,...ev.ins]){
       if(STABLES.has(leg.token)) continue;
       const pr=getPrice(leg.token,leg.contract,ev.ts);
       if(pr.usd==null){ const okey=priceKey(leg.token,leg.contract,ev.ts);
-        priceCells+=`<div style="margin-top:3px"><span class="flag">${leg.token} price?</span> <input class="priceInput" placeholder="$/unit" onchange="setManualPrice('${okey}',this.value)"></div>`; }
+        priceCells+=`<div style="margin-top:3px"><span class="flag">${escapeHtml(leg.token)} $?</span> <input class="priceInput" placeholder="$/unit" onchange="setManualPrice('${okey}',this.value)"></div>`; }
     }
+    const cpName=S.cpLabels[ev.counter]?escapeHtml(S.cpLabels[ev.counter]):(ev.counter?shortA(ev.counter):'');
     rows+=`<tr>
       <td><span class="pill ${CHAINS[ev.cid].key}">${CHAINS[ev.cid].name}</span><div style="font-size:11px;color:var(--muted);margin-top:2px">${escapeHtml(wl?wl.label:shortA(ev.wallet))}</div></td>
-      <td>${dateUTC(ev.ts)}</td>
+      <td>${dateUTC(ev.ts)}<div style="font-size:10.5px;color:var(--muted)">${cpName}</div></td>
       <td style="color:var(--rust)">${legsTxt(ev.outs)}</td>
       <td style="color:var(--green)">${legsTxt(ev.ins)}</td>
       <td><select class="miniSelect" onchange="setType('${ev.id}',this.value)">${opts}</select>${priceCells}</td>
@@ -693,8 +755,8 @@ function eventsTable(evs){
     </tr>`;
   }
   return `<div class="scrolly"><table>
-    <tr><th>Chain / wallet</th><th>Date</th><th>Out (disposed)</th><th>In (received)</th><th>Treatment</th><th class="num">Gain</th><th>Tx</th></tr>
-    ${rows}</table></div>`;
+    <tr><th>Chain / wallet</th><th>Date / party</th><th>Out (disposed)</th><th>In (received)</th><th>Treatment</th><th class="num">Gain</th><th>Tx</th></tr>
+    ${rows}</table></div>${cap&&evs.length>cap?`<p class="hint">Showing ${cap} of ${evs.length} — narrow with the filter or classify in bulk from the Review queue.</p>`:''}`;
 }
 function setType(id,val){ S.cls[id]=val; save(); recompute(); }
 function setManualPrice(okey,val){ const n=parseFloat(val); if(!isNaN(n)) S.priceOverride[okey]=n; save(); recompute(); }
