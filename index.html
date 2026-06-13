@@ -506,26 +506,20 @@ function getPrice(token,contract,ts){
 async function testPriceSources(){
   const ts=Math.floor(Date.parse('2022-02-09T00:00:00Z')/1000);
   log('— PRICE SOURCE SELF-TEST · ETH 2022-02-09 · expect ≈ $3,000 —');
-  // 1) CoinGecko (free tier blocks >365 days — failure here is EXPECTED)
+  // 1) Coinbase Exchange candles (PRIMARY deep-history source)
   try{
-    const u=new URL(`${CG_BASE}/coins/ethereum/history`); u.searchParams.set('date','09-02-2022'); u.searchParams.set('localization','false');
-    if(S.keys.cg)u.searchParams.set('x_cg_demo_api_key',S.keys.cg);
-    const r=await fetch(u); let v=null; if(r.ok){ const j=await r.json(); v=j&&j.market_data&&j.market_data.current_price?j.market_data.current_price.usd:null; }
-    log(`CoinGecko:   HTTP ${r.status} → ${v!=null?('$'+v):'null (expected: free tier = last 365 days only)'}`);
-  }catch(e){ log(`CoinGecko:   FETCH ERROR → ${e.message}`); }
-  // 2) Coinbase (this is the one that SHOULD work)
+    const day=86400, s=new Date((ts-day)*1000).toISOString(), e=new Date((ts+day)*1000).toISOString();
+    const r=await fetch(`https://api.exchange.coinbase.com/products/ETH-USD/candles?granularity=86400&start=${s}&end=${e}`);
+    let v=null; if(r.ok){ const rows=await r.json(); if(Array.isArray(rows)&&rows.length){ const t=dateUTC(ts); const row=rows.find(x=>dateUTC(x[0])===t)||rows[0]; v=row[4]; } }
+    log(`Coinbase Exchange: HTTP ${r.status} → ${v!=null?('$'+v+'  ✅ working'):'null'}`);
+  }catch(e){ log(`Coinbase Exchange: FETCH ERROR → ${e.message}  ← browser blocking it`); }
+  // 2) Binance.US klines (BACKUP)
   try{
-    const r=await fetch(`https://api.coinbase.com/v2/prices/ETH-USD/spot?date=2022-02-09`);
-    let v=null; if(r.ok){ const j=await r.json(); v=j&&j.data&&j.data.amount?j.data.amount:null; }
-    log(`Coinbase:    HTTP ${r.status} → ${v!=null?('$'+v+'  ✅ working'):'null'}`);
-  }catch(e){ log(`Coinbase:    FETCH ERROR → ${e.message}  ← browser is blocking this (CORS/extension/VPN)`); }
-  // 3) CryptoCompare (backup)
-  try{
-    const u=new URL(CC_BASE); u.searchParams.set('fsym','ETH'); u.searchParams.set('tsym','USD'); u.searchParams.set('limit','1'); u.searchParams.set('toTs',String(ts));
-    const r=await fetch(u); let v=null; if(r.ok){ const j=await r.json(); const rows=j&&j.Data&&j.Data.Data; v=rows&&rows.length?rows[rows.length-1].close:null; }
-    log(`CryptoCompare: HTTP ${r.status} → ${v!=null?('$'+v+'  ✅ working'):'null'}`);
-  }catch(e){ log(`CryptoCompare: FETCH ERROR → ${e.message}  ← browser is blocking this`); }
-  log('— end self-test · if Coinbase shows a $ price, click “Fetch missing prices” and let it run —');
+    const day=86400000, r=await fetch(`https://api.binance.us/api/v3/klines?symbol=ETHUSD&interval=1d&startTime=${ts*1000-day}&endTime=${ts*1000+day}&limit=3`);
+    let v=null; if(r.ok){ const rows=await r.json(); if(Array.isArray(rows)&&rows.length){ const t=dateUTC(ts); const row=rows.find(x=>dateUTC(Math.floor(x[0]/1000))===t)||rows[0]; v=parseFloat(row[4]); } }
+    log(`Binance.US:        HTTP ${r.status} → ${v!=null?('$'+v+'  ✅ working'):'null'}`);
+  }catch(e){ log(`Binance.US:        FETCH ERROR → ${e.message}  ← browser blocking it`); }
+  log('— end self-test · if either shows a $ price, click “Fetch missing prices” and let it run —');
 }
 async function fetchPrices(){
   // only fetch prices the current classification actually needs — skip review/ignore/transfer/spam
@@ -577,32 +571,49 @@ async function cgHistorical(info){
     if(r.status===429){ await sleep(4000); return cgHistorical(info); }
     if(r.ok){ const j=await r.json(); const v=j&&j.market_data&&j.market_data.current_price?j.market_data.current_price.usd:null; if(v!=null) return v; }
   }
-  // fallback chain (deep history past CoinGecko's 365-day free wall):
-  // 1) Coinbase spot-by-date (keyless, US-friendly, CORS-ok, covers the majors)
-  // 2) CryptoCompare daily close (broader symbol coverage)
-  const cb=await cbHistorical(info); if(cb!=null) return cb;
-  return ccHistorical(info);
+  // CoinGecko demo only serves ~365 days; for older dates use deep-history sources
+  return deepHistorical(info);
 }
-// Coinbase covers these reliably with deep history; skip the rest to avoid 404 spam
-const CB_OK = new Set(['ETH','BTC','LINK','ARB','MATIC','POL','UNI','AAVE','CRV','LDO','PEPE','SHIB','APE','IMX','GMX','SOL','AVAX','OP','DOGE','LTC','ATOM','GRT','SAND','MANA','FTM','ENS','SNX','COMP','MKR','SUSHI']);
-const CB_SYM = { WETH:'ETH', WBTC:'BTC', WMATIC:'MATIC', WPOL:'POL', WBNB:'BNB' };
-async function cbHistorical(info){
-  let sym=(CB_SYM[(info.token||'').toUpperCase()] || (info.token||'').toUpperCase());
-  if(!CB_OK.has(sym)) return null;
-  // Coinbase renamed MATIC->POL; try the symbol, then its alias, for older/newer dates
-  const tries = sym==='POL' ? ['POL','MATIC'] : sym==='MATIC' ? ['MATIC','POL'] : [sym];
+// Symbols with reliable deep daily history on Coinbase Exchange / Binance.US
+const DEEP_OK = new Set(['ETH','BTC','LINK','ARB','MATIC','POL','UNI','AAVE','CRV','LDO','PEPE','SHIB','APE','IMX','GMX','SOL','AVAX','OP','DOGE','LTC','ATOM','GRT','SAND','MANA','FTM','ENS','SNX','COMP','MKR','SUSHI','BNB']);
+const DEEP_SYM = { WETH:'ETH', WBTC:'BTC', WMATIC:'MATIC', WPOL:'POL', WBNB:'BNB' };
+const normSym = t => { t=(t||'').toUpperCase(); return DEEP_SYM[t]||t; };
+async function deepHistorical(info){
+  const sym=normSym(info.token); if(!DEEP_OK.has(sym)) return null;
+  const cb=await cbExchangeHistorical(sym,info.ts); if(cb!=null) return cb;
+  return binanceUSHistorical(sym,info.ts);
+}
+// Coinbase Exchange daily candles: rows = [time(s), low, high, open, close, volume]
+async function cbExchangeHistorical(sym,ts){
+  const day=86400, startISO=new Date((ts-day)*1000).toISOString(), endISO=new Date((ts+day)*1000).toISOString();
+  const tries = sym==='POL'?['POL','MATIC']:sym==='MATIC'?['MATIC','POL']:[sym];
   for(const s of tries){
     try{
-      const r=await fetch(`https://api.coinbase.com/v2/prices/${s}-USD/spot?date=${dateUTC(info.ts)}`);
-      if(!r.ok) continue;
-      const j=await r.json();
-      const a=j&&j.data&&j.data.amount?parseFloat(j.data.amount):null;
-      if(a&&a>0) return a;
+      const u=`https://api.exchange.coinbase.com/products/${s}-USD/candles?granularity=86400&start=${startISO}&end=${endISO}`;
+      const r=await fetch(u); if(!r.ok) continue;
+      const rows=await r.json(); if(!Array.isArray(rows)||!rows.length) continue;
+      const target=dateUTC(ts); let best=rows.find(row=>dateUTC(row[0])===target)||rows[0];
+      const close=best[4]; if(close&&close>0) return close;
     }catch(e){}
   }
   return null;
 }
-async function ccHistorical(info){
+// Binance.US daily klines: rows = [openTime(ms), open, high, low, close, ...]
+async function binanceUSHistorical(sym,ts){
+  if(sym==='POL') sym='MATIC';
+  const day=86400000, startMs=ts*1000-day, endMs=ts*1000+day;
+  for(const quote of ['USD','USDT']){
+    try{
+      const u=`https://api.binance.us/api/v3/klines?symbol=${sym}${quote}&interval=1d&startTime=${startMs}&endTime=${endMs}&limit=3`;
+      const r=await fetch(u); if(!r.ok) continue;
+      const rows=await r.json(); if(!Array.isArray(rows)||!rows.length) continue;
+      const target=dateUTC(ts); let best=rows.find(row=>dateUTC(Math.floor(row[0]/1000))===target)||rows[0];
+      const close=parseFloat(best[4]); if(close&&close>0) return close;
+    }catch(e){}
+  }
+  return null;
+}
+async function ccHistorical_unused(info){
   const sym=ccSymbol(info.token);
   const u=new URL(CC_BASE); u.searchParams.set('fsym',sym); u.searchParams.set('tsym','USD');
   u.searchParams.set('limit','1'); u.searchParams.set('toTs',String(info.ts));
