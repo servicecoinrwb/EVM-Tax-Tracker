@@ -541,7 +541,8 @@ function computeTax(){
       for(const leg of ev.ins){
         let need=leg.qty; const pl=pending[leg.token]||[];
         while(need>1e-12 && pl.length){ const lot=pl[0]; const take=Math.min(lot.qty,need); addLot(ev.cid,ev.wallet,leg.token,take,lot.basisPerUnit,lot.date); lot.qty-=take; need-=take; if(lot.qty<=1e-12) pl.shift(); }
-        if(need>1e-12){ addLot(ev.cid,ev.wallet,leg.token,need,0,ev.ts); flags.push(`Transfer in of ${fmtQty(need)} ${leg.token} (${dateUTC(ev.ts)}) had no matching out — basis set to $0. Verify.`); }
+        if(need>1e-12){ addLot(ev.cid,ev.wallet,leg.token,need, STABLES.has(leg.token)?1:0, ev.ts);
+          if(!STABLES.has(leg.token)) flags.push(`Transfer in of ${fmtQty(need)} ${leg.token} (${dateUTC(ev.ts)}) had no matching out — basis set to $0. Verify.`); }
       }
       eventResults[ev.id]={note:'transfer'}; continue;
     }
@@ -581,11 +582,12 @@ function computeTax(){
         if(p==null){ missing=true; flags.push(`Missing price for disposed ${leg.token} on ${dateUTC(ev.ts)}.`); continue; }
         let proceeds=leg.qty*p - (gasUSD/ev.outs.length); // gas reduces proceeds
         const {used,short}=consume(ev.cid,ev.wallet,leg.token,leg.qty,ev.ts);
-        if(short>0) flags.push(`Disposed ${fmtQty(short)} ${leg.token} with no tracked basis (${dateUTC(ev.ts)}) — basis $0 used.`);
+        const shortBasis = STABLES.has(leg.token)?1:0; // a dollar's basis is a dollar
+        if(short>0 && !STABLES.has(leg.token)) flags.push(`Disposed ${fmtQty(short)} ${leg.token} with no tracked basis (${dateUTC(ev.ts)}) — basis $0 used.`);
         // split proceeds across consumed lots by qty for term classification
         const totalQty=used.reduce((s,u)=>s+u.take,0)+short;
         const perUnitProceeds = totalQty>0 ? proceeds/totalQty : 0;
-        const allUsed=[...used, ...(short>0?[{take:short,date:ev.ts,basisPerUnit:0}]:[])];
+        const allUsed=[...used, ...(short>0?[{take:short,date:ev.ts,basisPerUnit:shortBasis}]:[])];
         for(const u of allUsed){
           const lotProceeds=u.take*perUnitProceeds, lotBasis=u.take*u.basisPerUnit;
           const longTerm=(ev.ts-u.date)>SECONDS_LONG;
