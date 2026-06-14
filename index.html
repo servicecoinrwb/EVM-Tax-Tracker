@@ -420,6 +420,52 @@ function isSpam(sym){
   if(/HTTPS?:|WWW\.|:\/\/|\.(VIP|XYZ|PRO|ORG|GG|TOP|APP|LIVE|CC|IO|COM|NET|CO|US|FUN|CLICK|SITE|ONLINE|INFO|ME)\b|CLAIM|REWARD|VOUCHER|AIRDROP|T\.ME|\bBONUS\b/.test(s)) return true;
   return false;
 }
+// Tokens you created/control — never a real market sale; default to non-taxable transfer.
+const MY_TOKENS = new Set(['SRV','SREV','MTYLD','CYPH','XCYPH','SXCYPH','OCYPH','CPA','CAMEL','HIKI','SPN']);
+// DeFi receipt / wrapper / staked tokens: holding one of these means you DEPOSITED your own
+// money into a protocol (Aave, Radiant, Camelot, GMX, gTrade, Pendle…) and got a claim ticket
+// back. Acquiring/returning the ticket is not a market disposal — it's a transfer of your funds.
+function isReceiptToken(sym){
+  if(!sym) return false;
+  const t=sym.toUpperCase();
+  if(MY_TOKENS.has(t)) return true;
+  if(t.startsWith('VARIABLEDEBT')) return true;                                   // Aave debt
+  if(/^A(ARB|WETH|ETH|USDC|USDT|DAI|LINK|WBTC|GRAIL|ZRO)/.test(t)) return true;   // Aave aTokens
+  if(/^R(WETH|USDC|USDT|WBTC|ARB|DAI|USDCN|WEETH|WSTETH|ZUSDC|ZZRO|IZV|UNIC|UNIX|DNT|B)$/.test(t)) return true; // Radiant
+  if(['RARB','RUSDC','RUSDT','RWETH','RWBTC','RDAI','RUSDCN','RWEETH','RWSTETH','RDNT','RUNIC','RUNIX','RZUSDC','RZZRO','RIZVUSDC','RIZVWETH'].includes(t)) return true;
+  if(t.includes('GRAIL') && t!=='GRAIL') return true;                             // Camelot xGRAIL/sGRAIL/LP
+  if(/^(ES|SBF|BN)GMX/.test(t) || ['FSGLP','GLP','GMX_DAO'].includes(t)) return true; // GMX
+  if(/^(ES|SBF|SP|S|V|BN)(GNS|RDNT|SILO|PENDLE|PEAR|RAM|VELA|TND|TROVE|KLIMA|WINR)/.test(t)) return true; // staked/escrowed
+  if(['GUSDC','GDAI','GETH','SGNS'].includes(t)) return true;                     // gTrade
+  if(/(-LP$|JLP|WLP|STEER|CMLT|COWCAMELOT|^RZ|APOL|LTAP|^SPT-|^PT-|^YT-)/.test(t) || t==='PENDLE-LPT') return true; // LP / vault / Pendle
+  if(['WEETH','WSTETH','RWEETH','RWSTETH','BETH'].includes(t)) return true;       // ETH wraps / LSTs
+  return false;
+}
+// An event is a DeFi deposit/withdraw (→ Transfer) only when it involves a receipt/own token
+// AND every other token is just ETH or a stablecoin — so it can never hide a real altcoin sale.
+function isDefiWrapEvent(ev){
+  const toks=[...ev.outs,...ev.ins]; if(!toks.length) return false;
+  let hasReceipt=false;
+  for(const l of toks){
+    const t=l.token.toUpperCase();
+    if(isReceiptToken(t)){ hasReceipt=true; continue; }
+    if(t==='ETH' || STABLES.has(l.token)) continue;   // safe counterparty
+    return false;                                     // a real alt is on the other side → leave for review
+  }
+  return hasReceipt;
+}
+// One-click first pass: label every DeFi deposit/withdraw and your-own-token move as Transfer.
+function autoClassifyDeFi(){
+  if(!CURRENT) return;
+  let n=0;
+  for(const ev of CURRENT.events){
+    if(ev.auto==='ignore') continue;        // spam already filtered
+    if(S.cls[ev.id]) continue;              // never override a choice you made
+    if(isDefiWrapEvent(ev)){ S.cls[ev.id]='transfer'; n++; }
+  }
+  save(); recompute();
+  toast(`Auto-labeled ${n} DeFi deposit/withdraw & your-own-token events as Transfers (non-taxable). Review the rest in the queue; undo any single one by changing its dropdown.`);
+}
 function mkLeg(cid,wallet,hash,ts,token,contract,qty,dir,from,to){
   const n=normToken(token,contract);
   return { id:legId(cid,wallet,hash,n.token,n.contract,dir,qty), chain:cid, wallet:lc(wallet), hash, ts, token:n.token, contract:n.contract, qty, dir, from, to };
@@ -842,7 +888,14 @@ function renderReview(){
       <td class="num">${g.count}</td>
       <td>${bulkSel('toksel_'+i, g.inOnly?'ignore':'')} <button class="sky" style="padding:5px 10px" onclick="applyTok(${i})">Apply</button></td></tr>`).join('');
 
+  // count how many events the one-click pass would handle right now
+  let _wrapN=0; for(const ev of CURRENT.events){ if(ev.auto!=='ignore' && !S.cls[ev.id] && isDefiWrapEvent(ev)) _wrapN++; }
+
   el.innerHTML=`
+   <div class="infobox" style="background:#e4f0e8;border-color:#a9cdb6">
+     <strong>Start here.</strong> ${_wrapN} of these are DeFi deposits/withdrawals (Aave, Radiant, Camelot, GMX…) and moves of your own tokens (MTYLD, CYPH, SRV…). None of those are taxable sales — they're your money moving, not market disposals.
+     <div style="margin-top:8px"><button class="sky" onclick="autoClassifyDeFi()">⚡ Auto-label all ${_wrapN} as Transfers (non-taxable)</button></div>
+     <span class="hint" style="margin:6px 0 0;display:block">Only touches events whose other side is just ETH or a stablecoin, so it can't hide a real coin sale. Reversible — change any dropdown to override.</span></div>
    <div class="infobox">${evs.length} events to classify — <strong>your top 15 counterparties cover ${topN} of them (${Math.round(topN/evs.length*100)}%)</strong>, so ~15 labels clears most of this.
      <span class="pill transfer">round-trip</span> = same asset went out and came back → bridge / LP / lending / CEX → almost always <em>Transfer</em> (I’ve pre-selected it).
      <span class="pill income">in only</span> you never sent = likely a reward (Income) or spam (Ignore).
